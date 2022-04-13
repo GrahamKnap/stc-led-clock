@@ -1,176 +1,88 @@
-
 #ifndef _DISPLAY_H
 #define _DISPLAY_H
 
-enum stateTable {
-    // Regular display:
-        stClock,
-        stClockSeconds,
+#include <stdint.h>
 
-#if OPT_TEMP_DSP
-        stOptTemp,
-#endif
-#if OPT_DATE_DSP
-        stOptDate,
-#endif
-#if OPT_DAY_DSP
-        stOptDay,
-#endif
-    // setup/config:
-        scSet,
-        scBeep,
-        scDsp,
-        scCfg,
-        // set:
-        msClock,msClockHour,msClockMinute,
-        msAlarm,msAlarmHour,msAlarmMinute,
-        msChime,msChimeStartHour,msChimeStopHour,
-#if OPT_DATE_DSP
-        msDate,msDateMonth,msDateDay,
-#endif
-#if OPT_DAY_DSP
-        msDay,msDayOfWeek,
-#endif
-    // beep:
-        msAlarmOff,msAlarmOn,           // the next 5 states:
-        msChimeOff,msChimeOn,           // OFF must preceed ON state
-    // dsp:
-#if OPT_TEMP_DSP
-        msDspTempOff,msDspTempOn,       // due to assumuptions in
-#endif
-#if OPT_DATE_DSP
-        msDateOff,msDateOn,             // in state change code
-#endif
-#if OPT_DAY_DSP
-        msDayOff,msDayOn,
-#endif
-    // cfg:
-#if OPT_UNITS_GROUP
-        msSetUnits,msEU,msUS,
+// This number dictates how many brightness levels are available.
+// Smaller numbers produce faster refresh rates, or less flicker.
+// refresh Hz = T0FREQ / (4 digits * DISPLAY_TICKS)
+#define DISPLAY_TICKS   50
+
+// Segments A through F are in clockwise order around the perimeter,
+// starting with segment A at the top. Segment G is in the center.
+
+#define SEVENSEG(a,b,c,d,e,f,g) \
+    (uint8_t)((0 << 7) | ((g) << 6) | ((f) << 5) | ((e) << 4) \
+    | ((d) << 3) | ((c) << 2) | ((b) << 1) | ((a) << 0))
+
+#define SEVENSEG_0 SEVENSEG(1,1,1,1,1,1,0)
+#define SEVENSEG_1 SEVENSEG(0,1,1,0,0,0,0)
+#define SEVENSEG_2 SEVENSEG(1,1,0,1,1,0,1)
+#define SEVENSEG_3 SEVENSEG(1,1,1,1,0,0,1)
+#define SEVENSEG_4 SEVENSEG(0,1,1,0,0,1,1)
+#define SEVENSEG_5 SEVENSEG(1,0,1,1,0,1,1)
+#define SEVENSEG_6 SEVENSEG(1,0,1,1,1,1,1)
+#define SEVENSEG_7 SEVENSEG(1,1,1,0,0,0,0)
+#define SEVENSEG_8 SEVENSEG(1,1,1,1,1,1,1)
+#define SEVENSEG_9 SEVENSEG(1,1,1,1,0,1,1)
+
+#define SEVENSEG_A SEVENSEG(1,1,1,0,1,1,1)
+#define SEVENSEG_b SEVENSEG(0,0,1,1,1,1,1)
+#define SEVENSEG_C SEVENSEG(1,0,0,1,1,1,0)
+#define SEVENSEG_c SEVENSEG(0,0,0,1,1,0,1)
+#define SEVENSEG_d SEVENSEG(0,1,1,1,1,0,1)
+#define SEVENSEG_E SEVENSEG(1,0,0,1,1,1,1)
+#define SEVENSEG_F SEVENSEG(1,0,0,0,1,1,1)
+#define SEVENSEG_g SEVENSEG(1,1,1,1,0,1,1)
+#define SEVENSEG_H SEVENSEG(0,1,1,0,1,1,1)
+#define SEVENSEG_h SEVENSEG(0,0,1,0,1,1,1)
+#define SEVENSEG_I SEVENSEG(0,1,1,0,0,0,0)
+#define SEVENSEG_i SEVENSEG(0,0,1,0,0,0,0)
+#define SEVENSEG_J SEVENSEG(0,1,1,1,1,0,0)
+#define SEVENSEG_L SEVENSEG(0,0,0,1,1,1,0)
+#define SEVENSEG_M SEVENSEG(1,0,1,0,1,0,0)  // ugly
+#define SEVENSEG_n SEVENSEG(0,0,1,0,1,0,1)
+#define SEVENSEG_O SEVENSEG(1,1,1,1,1,1,0)
+#define SEVENSEG_o SEVENSEG(0,0,1,1,1,0,1)
+#define SEVENSEG_P SEVENSEG(1,1,0,0,1,1,1)
+#define SEVENSEG_q SEVENSEG(1,1,1,0,0,1,0)
+#define SEVENSEG_r SEVENSEG(0,0,0,0,1,0,1)
+#define SEVENSEG_S SEVENSEG(1,0,1,1,0,1,1)
+#define SEVENSEG_t SEVENSEG(0,0,0,1,1,1,1)
+#define SEVENSEG_U SEVENSEG(0,1,1,1,1,1,0)
+#define SEVENSEG_u SEVENSEG(0,0,1,1,1,0,0)
+#define SEVENSEG_W SEVENSEG(0,1,0,1,0,1,0)  // ugly
+#define SEVENSEG_y SEVENSEG(0,1,1,1,0,1,1)
+
+#define SEVENSEG_dash SEVENSEG(0,0,0,0,0,0,1)
+
+// Inverting a digit exchanges segments A-C with D-F.
+// The center segment G and decimal point are unaffected.
+
+#define ROTATE_DIGIT(v) \
+    (uint8_t)(((v) & 0xc0) | (((v) & 0x07) << 3) | (((v) & 0x38) >> 3))
+
+#if DIGIT_2_FLIP
+    #define ORIENT_DIGIT2(v) ROTATE_DIGIT(v)
 #else
-        msFormatTime,ms24,ms12,
-        msTempUnits,msC,msF,
-        msFormatDate,ms3112,ms1231,
+    #define ORIENT_DIGIT2(v) (v)
 #endif
-        msBrightness,msBrtMax,msBrtMin,
-#if OPT_TEMP_DSP
-        msTempCal,msSetTemp,
-#endif
-    // exit for all
-        msExit
-};
 
-enum text2Entry {
-    txClock,
-    txAlarm,
-    txChime,
-#if OPT_DATE_DSP
-    txDate,
-#endif
-#if OPT_DAY_DSP
-    txDay,
-#endif
-#if OPT_TEMP_DSP
-    txTemp,
-#endif
-#if OPT_UNITS_GROUP
-    txUS,
-    txEU,
-#else
-    tx12,
-    tx24,
-    txF,
-    txC,
-#endif
-    txOff,
-    txOn,
-    NoText2
-    };
+#define DP_BIT      0x80
 
-enum text4Entry {
-// set stuff
-    txSet,
-    txBeep,
-    txDsp,
-    txCfg,
-// config stuff
-#if OPT_UNITS_GROUP
-    txUnit,
-#else
-    tx1224,
-    tx1231,
-    tx3112,
-#endif
-    txBrt,
-    txCal,
-    txDate4,
-    txTemp4,
-    };
+extern uint8_t brightLevel;
+extern uint8_t digit[4];
 
-enum led_position { H10,H01,M10,M01 };
-enum decimal_status { OFF, ON };
-
-void updateClock();
-void displayFSM();
-void setupHour(uint8_t);
-
-//void displayHours(__bit);
-void displayHoursOn();
-void displayHoursOff();
-void displayHoursFlash();
-
-//void displayMinutes(__bit);
-void displayMinutesOn();
-void displayMinutesOff();
-void displayMinutesFlash();
-
-void displayTemperature();
-void displayDate();
-void displayDayOfWeek();
-
-void blankDisplay();
-void displayUpdateISR();
-void setChimeVars();
-void getDateVars();
-void putDateVars();
-void setHourDigits(uint8_t);
-void setMinuteDigits(uint8_t);
-void setAllDigits(uint8_t);
-void setMsgOn();
-void setMsgOff();
-void setDayOfWeek();
-
-uint8_t incrementHours(uint8_t);
-uint8_t incrementMinutes(uint8_t);
-uint8_t incrementDate(uint8_t,uint8_t);
-uint8_t incrementDay(uint8_t);
-uint8_t incrementBrightness(uint8_t);
-uint8_t inc12(uint8_t);
-uint8_t inc31(uint8_t);
-
-#define segs CathodeBuf
-
-// these two bits used to flash various things
-
-extern __bit _1hzToggle;
-extern __bit _5hzToggle;
-
-extern volatile uint8_t userTimer3;         // decremented every 3ms by timer 0 task
-extern volatile uint8_t userTimer100;       // decremented every 100ms by timer 0 task
-
-// and access to the main data source
-
-extern struct Clock clockRam;
-
-// these are saved in DS1302 battery backed ram
-
-extern __bit AlarmOn;     // alarm On/Off status
-extern __bit ChimeOn;     // chime On/Off status
-extern __bit TempOn;      // Temperature Display On/Off status
-extern __bit DateOn;      // Date display On/Off status
-extern __bit DowOn;       // Day of Week On/Off status
-extern __bit Select_FC;   // select degrees F or C
-extern __bit Select_MD;   // select month:day display format MM:DD or DD:MM
-extern __bit Select_12;   // = 1 when 12 hr mode
+void InitDisplay(void);
+void DisplayUpdateISR(void);
+void CommitDisplay(void);
+void DisplayHexLeft(uint8_t value);
+void DisplayHexRight(uint8_t value);
+void DisplayHours(uint8_t bcdHours);
+void DisplayMonth(uint8_t bcdMonth);
+void DisplayTemperature(uint8_t bcdTemperature);
+void DisplayDayOfWeek(void);
+void DisplayColon(void);
+void DisplayPM(uint8_t bcdHours);
 
 #endif

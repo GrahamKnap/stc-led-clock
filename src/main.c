@@ -1,180 +1,782 @@
 //
 // STC15W408AS LED Clock
 //
+
+// project definitions
+#include "global.h"
+
+// definitions for this file
+// (none)
+
+// other local headers
+#include "adc.h"
+#include "chime.h"
+#include "config.h"
+#include "display.h"
+#include "ds1302.h"
+#include "serial.h"
+#include "timer.h"
+#include "utility.h"
+
+// system headers
 #include <stdint.h>
 #include "stc15.h"
-#include "global.h"
-#include "timer.h"
-#include "ds1302.h"
-#include "adc.h"
-#include "display.h"
-#include "utility.h"
-#if HAS_NY3P_SPEECH
-#include "sound.h"
-#endif
-#if DEBUG
-#include "serial.h"
-#include "stdio.h"  // used for debug only
-#endif
 
-void checkAlarm();
-void checkChime();
-void soundChime();
-void alarmDelay(uint8_t ticks);
 
-uint8_t i;
-__bit soundAlarm;
+enum stateTable
+{
+    stClock,
+    msClock, msClockHour, msClockMinute, msClockSeconds,
+    msAlarm, msAlarmToggle, msAlarmHour, msAlarmMinute,
+    msChime, msChimeToggle, msChimeStartHour, msChimeStopHour,
+    msDate, msYear, msMonth, msDateDay, msDayOfWeek,
+    scCfg, msToggle24H, msToggleTempUnits, msToggleDateFormat, msToggleAutoCycle,
+    msBrightness, msBrtMax, msBrtMin,
+    msTempCal, msSetTemp,
+    msSaveConfig, msExit
+};
+
+static uint8_t displayState;    // the main control variable
+static uint8_t bcdTemp;         // result of ADC and transform
+static uint8_t setupTimeout;
+
+
+static void ClockStateMachine(void)
+{
+    static __bit handleS1;
+    static __bit handleS2;
+
+    handleS1 = pressedS1;
+    pressedS1 = FALSE;
+    handleS2 = pressedS2;
+    pressedS2 = FALSE;
+
+    switch (displayState)
+    {
+
+    case stClock:
+        ReadClock();
+
+        if (userTimer100 == 0)
+        {
+            DisplayHours(clock.hour);
+            DisplayHexRight(clock.minute);
+            DisplayColon();
+            DisplayPM(clock.hour);
+        }
+        else if (userTimer100 <= 100 || userTimer100 > 175)
+        {
+            if (userTimer100 > 175) userTimer100 = 250;
+            DisplayHexRight(clock.second);
+            DisplayColon();
+        }
+        else if (userTimer100 <= 125)
+        {
+            DisplayTemperature(bcdTemp);
+        }
+        else if (userTimer100 <= 150)
+        {
+            DisplayMonth(clock.month);
+
+            if (monthFirst)
+            {
+                DisplayHexRight(clock.date);
+            }
+            else
+            {
+                DisplayHexLeft(clock.date);
+            }
+        }
+        else    // 151 to 175
+        {
+            DisplayDayOfWeek();
+        }
+
+        if (handleS1)
+        {
+            userTimer100 = 10;
+            setupTimeout = SETUP_TIMEOUT;
+            displayState = msClock;
+        }
+        else if (handleS2)
+        {
+            if (userTimer100 > 100)
+            {
+                userTimer100 = 0;
+            }
+            else
+            {
+                userTimer100 = (userTimer100 == 0) ? 175 : 250;
+            }
+        }
+        else if (autoCycle && userTimer100 == 0 && clock.second == 0x46)
+        {
+            userTimer100 = 175;
+        }
+
+        break;
+
+    // --- clock settings ---
+
+    case msClock:
+        digit[0] = SEVENSEG_C;
+        digit[1] = SEVENSEG_L;
+
+        if (handleS1)
+        {
+            displayState = msAlarm;
+        }
+        else if (handleS2)
+        {
+            displayState = msClockHour;
+        }
+
+        break;
+
+    case msClockHour:
+        if (flashStateS2) DisplayHours(clock.hour);
+        DisplayHexRight(clock.minute);
+        DisplayColon();
+        DisplayPM(clock.hour);
+
+        if (handleS1)
+        {
+            displayState = msClockMinute;
+        }
+        else if (handleS2)
+        {
+            clock.hour = IncrementHours(clock.hour);
+        }
+
+        break;
+
+    case msClockMinute:
+        DisplayHours(clock.hour);
+        if (flashStateS2) DisplayHexRight(clock.minute);
+        DisplayColon();
+        DisplayPM(clock.hour);
+
+        if (handleS1)
+        {
+            WriteClock();
+            displayState = msClockSeconds;
+        }
+        else if (handleS2)
+        {
+            clock.minute = IncrementMinutes(clock.minute);
+        }
+
+        break;
+
+    case msClockSeconds:
+        ReadClock();
+        DisplayHexLeft(clock.minute);
+        if (fastFlashState) DisplayHexRight(clock.second);
+        DisplayColon();
+
+        if (handleS1)
+        {
+            displayState = msExit;
+        }
+        else if (handleS2)
+        {
+            // snap to nearest minute
+            if (clock.second >= 0x30)
+            {
+                clock.minute = IncrementMinutes(clock.minute);
+            }
+
+            clock.second = 0;
+            WriteClock();
+        }
+
+        break;
+
+    // --- alarm settings ---
+
+    case msAlarm:
+        digit[0] = SEVENSEG_A;
+        digit[1] = SEVENSEG_L;
+
+        if (handleS1)
+        {
+            displayState = msChime;
+        }
+        else if (handleS2)
+        {
+            displayState = msAlarmToggle;
+        }
+
+        break;
+
+    case msAlarmToggle:
+        digit[0] = SEVENSEG_A;
+        digit[1] = SEVENSEG_L;
+
+        if (fastFlashState)
+        {
+            digit[2] = ORIENT_DIGIT2(SEVENSEG_o);
+            digit[3] = (alarmOn) ? SEVENSEG_n : SEVENSEG_F;
+        }
+
+        if (handleS1)
+        {
+            displayState = msAlarmHour;
+        }
+        else if (handleS2)
+        {
+            alarmOn = !alarmOn;
+        }
+
+        break;
+
+    case msAlarmHour:
+        if (flashStateS2) DisplayHours(config.alarmHour);
+        DisplayHexRight(config.alarmMinute);
+        DisplayColon();
+        DisplayPM(config.alarmHour);
+
+        if (handleS1)
+        {
+            displayState = msAlarmMinute;
+        }
+        else if (handleS2)
+        {
+            config.alarmHour = IncrementHours(config.alarmHour);
+        }
+
+        break;
+
+    case msAlarmMinute:
+        DisplayHours(config.alarmHour);
+        if (flashStateS2) DisplayHexRight(config.alarmMinute);
+        DisplayColon();
+        DisplayPM(config.alarmHour);
+
+        if (handleS1)
+        {
+            displayState = msSaveConfig;
+        }
+        else if (handleS2)
+        {
+            config.alarmMinute = IncrementMinutes(config.alarmMinute);
+        }
+
+        break;
+
+    // --- chime settings ---
+
+    case msChime:
+        digit[0] = SEVENSEG_C;
+        digit[1] = SEVENSEG_H;
+
+        if (handleS1)
+        {
+            displayState = msDate;
+        }
+        else if (handleS2)
+        {
+            displayState = msChimeToggle;
+        }
+
+        break;
+
+    case msChimeToggle:
+        digit[0] = SEVENSEG_C;
+        digit[1] = SEVENSEG_H;
+
+        if (fastFlashState)
+        {
+            digit[2] = ORIENT_DIGIT2(SEVENSEG_o);
+            digit[3] = (chimeOn) ? SEVENSEG_n : SEVENSEG_F;
+        }
+
+        if (handleS1)
+        {
+            displayState = msChimeStartHour;
+        }
+        else if (handleS2)
+        {
+            chimeOn = !chimeOn;
+        }
+
+        break;
+
+    case msChimeStartHour:
+        if (flashStateS2) DisplayHours(config.chimeStartHour);
+        digit[2] = ORIENT_DIGIT2(SEVENSEG_C);
+        digit[3] = SEVENSEG_b;
+        DisplayPM(config.chimeStartHour);
+
+        if (handleS1)
+        {
+            displayState = msChimeStopHour;
+        }
+        else if (handleS2)
+        {
+            config.chimeStartHour = IncrementHours(config.chimeStartHour);
+        }
+
+        break;
+
+    case msChimeStopHour:
+        if (flashStateS2) DisplayHours(config.chimeStopHour);
+        digit[2] = ORIENT_DIGIT2(SEVENSEG_C);
+        digit[3] = SEVENSEG_E;
+        DisplayPM(config.chimeStopHour);
+
+        if (handleS1)
+        {
+            displayState = msSaveConfig;
+        }
+        else if (handleS2)
+        {
+            config.chimeStopHour = IncrementHours(config.chimeStopHour);
+        }
+
+        break;
+
+    // --- date settings ---
+
+    case msDate:
+        digit[0] = SEVENSEG_d;
+        digit[1] = SEVENSEG_A;
+        digit[2] = SEVENSEG_t;
+        digit[3] = SEVENSEG_E;
+
+        if (handleS1)
+        {
+            displayState = scCfg;
+        }
+        else if (handleS2)
+        {
+            displayState = msYear;
+        }
+
+        break;
+
+    case msYear:
+        digit[0] = SEVENSEG_y;
+        digit[1] = SEVENSEG_r;
+        if (fastFlashState) DisplayHexRight(clock.year);
+
+        if (handleS1)
+        {
+            displayState = msMonth;
+        }
+        else if (handleS2)
+        { 
+            clock.year = IncrementBcd(clock.year);
+        }
+
+        break;
+
+    case msMonth:
+        if (flashStateS2) DisplayMonth(clock.month);
+
+        if (monthFirst)
+        {
+            DisplayHexRight(clock.date);
+        }
+        else
+        {
+            DisplayHexLeft(clock.date);
+        }
+
+        if (handleS1)
+        {
+            uint8_t maxDate = DaysInMonth(clock.month);
+            if (clock.date > maxDate) clock.date = maxDate;
+            displayState = msDateDay;
+        }
+        else if (handleS2)
+        {
+            uint8_t month = IncrementBcd(clock.month);
+            clock.month = (month <= 0x12) ? month : 1;
+        }
+
+        break;
+
+    case msDateDay:
+        DisplayMonth(clock.month);
+
+        if (flashStateS2)
+        {
+            if (monthFirst)
+            {
+                DisplayHexRight(clock.date);
+            }
+            else
+            {
+                DisplayHexLeft(clock.date);
+            }
+        }
+
+        if (handleS1)
+        {
+            displayState = msDayOfWeek;
+        }
+        else if (handleS2)
+        {
+            uint8_t maxDate = DaysInMonth(clock.month);
+            clock.date = (clock.date < maxDate) ? IncrementBcd(clock.date) : 0x01;
+        }
+
+        break;
+
+    case msDayOfWeek:
+        if (flashStateS2)
+        {
+#if OPT_DAY_ALPHA
+            DisplayDayOfWeek();
+#else
+            DisplayRightHex(clock.weekday);
+            digit[0] = SEVENSEG_d;
+            digit[1] = SEVENSEG_A;
+            digit[2] = ORIENT_DIGIT2(SEVENSEG_y);
+#endif
+        }
+
+        if (handleS1)
+        {
+            WriteDate();
+            displayState = msExit;
+        }
+        else if (handleS2)
+        {
+            clock.weekday = (clock.weekday < 7) ? (clock.weekday + 1) : 1;
+        }
+
+        break;
+
+    // --- configuration settings ---
+
+    case scCfg:
+        digit[0] = SEVENSEG_C;
+        digit[1] = SEVENSEG_F;
+        digit[2] = ORIENT_DIGIT2(SEVENSEG_g);
+        digit[3] = 0;
+
+        if (handleS1)
+        {
+            displayState = msBrightness;
+        }
+        else if (handleS2)
+        {
+            displayState = msToggle24H;
+        }
+
+        break;
+
+    case msToggle24H:
+        if (fastFlashState)
+        {
+            DisplayHexLeft((twelveHour) ? 0x12 : 0x24);
+            digit[2] = ORIENT_DIGIT2(SEVENSEG_H);
+        }
+
+        if (handleS1)
+        {
+            displayState = msToggleTempUnits;
+        }
+        else if (handleS2)
+        {
+            twelveHour = !twelveHour;
+        }
+
+        break;
+
+    case msToggleTempUnits:
+        if (fastFlashState)
+        {
+            digit[0] = SEVENSEG_d;
+            digit[1] = SEVENSEG_E;
+            digit[2] = ORIENT_DIGIT2(SEVENSEG_g);
+            digit[3] = (degreesF) ? SEVENSEG_F : SEVENSEG_C;
+        }
+
+        if (handleS1)
+        {
+            displayState = msToggleDateFormat;
+        }
+        else if (handleS2)
+        {
+            degreesF = !degreesF;
+        }
+
+        break;
+
+    case msToggleDateFormat:
+        if (fastFlashState)
+        {
+            DisplayMonth(0x12);
+
+            if (monthFirst)
+            {
+                DisplayHexRight(0x31);
+            }
+            else
+            {
+                DisplayHexLeft(0x31);
+            }
+        }
+
+        if (handleS1)
+        {
+            displayState = msToggleAutoCycle;
+        }
+        else if (handleS2)
+        {
+            monthFirst = !monthFirst;
+        }
+
+        break;
+
+    case msToggleAutoCycle:
+        digit[0] = SEVENSEG_A;
+        digit[1] = SEVENSEG_C;
+
+        if (fastFlashState)
+        {
+            digit[2] = ORIENT_DIGIT2(SEVENSEG_o);
+            digit[3] = (autoCycle) ? SEVENSEG_n : SEVENSEG_F;
+        }
+
+        if (handleS1)
+        {
+            displayState = msSaveConfig;
+        }
+        else if (handleS2)
+        {
+            autoCycle = !autoCycle;
+        }
+
+        break;
+
+    // --- brightness settings ---
+
+    case msBrightness:
+        digit[0] = SEVENSEG_b;
+        digit[1] = SEVENSEG_r;
+        digit[2] = ORIENT_DIGIT2(SEVENSEG_t);
+        digit[3] = 0;
+
+        if (handleS1)
+        {
+            displayState = msTempCal;
+        }
+        else if (handleS2)
+        {
+            displayState = msBrtMax;
+        }
+
+        break;
+
+    case msBrtMax:
+        digit[0] = SEVENSEG_b;
+        digit[1] = SEVENSEG_H;
+        if (flashStateS2) DisplayHexRight(config.brightMaximum);
+
+        if (handleS1)
+        {
+            displayState = msBrtMin;
+        }
+        else if (handleS2)
+        {
+            config.brightMaximum = IncrementBcd(config.brightMaximum);
+
+            if (config.brightMaximum >= DecToBcd(DISPLAY_TICKS))
+            {
+                config.brightMaximum = 0x01;
+                config.brightMinimum = 0x01;
+            }
+
+#if !HAS_LDR
+            brightLevel = clock.brightMaximum;
+#endif
+        }
+
+        break;
+
+    case msBrtMin:
+        digit[0] = SEVENSEG_b;
+        digit[1] = SEVENSEG_L;
+        if (flashStateS2) DisplayHexRight(config.brightMinimum);
+
+        if (handleS1)
+        {
+            displayState = msSaveConfig;
+        }
+        else if (handleS2)
+        {
+            config.brightMinimum = IncrementBcd(config.brightMinimum);
+
+            if (config.brightMinimum > config.brightMaximum)
+            {
+                config.brightMinimum = 0x01;
+            }
+        }
+
+        break;
+
+    // --- temperature settings ---
+
+    case msTempCal:
+        digit[0] = SEVENSEG_C;
+        digit[1] = SEVENSEG_A;
+        digit[2] = ORIENT_DIGIT2(SEVENSEG_L);
+        digit[3] = 0;
+
+        if (handleS1)
+        {
+            displayState = msExit;
+        }
+        else if (handleS2)
+        {
+            displayState = msSetTemp;
+        }
+
+        break;
+
+    case msSetTemp:
+        if (flashStateS2) DisplayTemperature(bcdTemp);
+
+        if (handleS1)
+        {
+            displayState = msSaveConfig;
+        }
+        else if (handleS2)
+        {
+            if (config.tempOffset == 15)
+            {
+                config.tempOffset = -15;
+            }
+            else
+            {
+                config.tempOffset += 1;
+            }
+        }
+
+        break;
+
+    // --- save/exit configuration ---
+
+    case msSaveConfig:
+        config.flags = configFlags;
+        WriteConfig();
+        // no "break", fall through to default
+
+    case msExit:
+    default:
+        userTimer100 = 0;
+        displayState = stClock;
+        break;
+    }
+
+    // With no code below the 'switch' block, each 'break' statement compiles
+    // to a 1-byte 'ret' instruction. Otherwise, it's a 3-byte 'ljmp'.
+}
+
+static void ReadSensors(void)
+{
+    static uint8_t roundRobin = 0;
+
+    if (adcBusy)
+    {
+        return;
+    }
+
+    if (roundRobin == 0)
+    {
+        bcdTemp = DecToBcd(DecodeTemperature(adcResult) + config.tempOffset);
+#if HAS_LDR
+        roundRobin = 1;
+        StartADC(ADC_LDR);
+    }
+    else if (roundRobin == 1)
+    {
+        brightLevel = (brightLevel + MapBrightness(adcResult) + 1) >> 1;
+        roundRobin = 0;
+#endif
+        StartADC(ADC_TEMP);
+    }
+}
 
 int main()
 {
-#if DEBUG
-    initSerial();           // use P3.6 & 3.7 serial port for debug!
-    printf_tiny("STC15W408AS awake\n");
-#endif
-    // setup 20ma source for direct drive clocks
-    SET_PORT_DRIVE;
-    // set photoresistor & ntc pins to open-drain output
-    SET_LDR_PORT;
-    SET_THERMISTOR_PORT;
-    // done setup of ports
-    blankDisplay();         // turn everything off for startup
-    initRtc();              // setup DS1302 and read config ram
-    initTimer0();           // start timers and display scan
-    delay3(33);             // wait 100ms - else the reset doesn't work
-    if (checkForReset()){
-        initColdStart();    // reset clock when both switches down @ powerup
-        while (checkForRelease()) ;
-    }
-#if TEST_DEFAULTS
-    initColdStart();        // reset everything everytime for testing on powerup
-#endif
-    getClock();
-#if HAS_NY3P_SPEECH         // first item spoken is one less than sent!!
-    speakItem(sndOh);       // must say (anything/something) to clear the chip
+#ifdef DEBUG
+    InitSerial();
+    PrintString("Start\r\n");
 #endif
 
-// soundAlarm - Toggle the buzzer on and off at an anoying rate!
-// The buzzer has its own native frequency when +5 volts is applied.
-// The polarity is usually low to sound buzzer so the constants
-// BZR_ON and BZR_OFF are usually inverted (ON = 0, OFF = 1)
-//
-// Routine waits until S1 is pressed to exit (and dumps keybuf)
+    InitDisplay();
 
-    while(TRUE) {
-#if OPT_CHIME
-        //check for Chime
-        if (ChimeOn)
-                if (clockRam.min == 0)
-                    if (clockRam.sec == 0)
-                        checkChime();
+#if HAS_LDR
+    InitADC(ADC_LDR);
 #endif
-#if OPT_ALARM
-        // check for Alarm
-        if (AlarmOn)
-            if (clockRam.hr == clockRam.almHour)
-                if (clockRam.min == clockRam.almMin)
-                    if (clockRam.sec == 3){
-                        displayState = stClock;
-                        soundAlarm = TRUE;
-                    }
-#endif
-        checkAlarm();               // sound alarm if needed
-#if HAS_NY3P_SPEECH
-    if ( displayState == stClock && pressedS3 && !soundAlarm ){
-        pressedS3 = FALSE;
-        speakTime();                // load buffer with sounds
-    }
-#endif
-        // call state machine, everthing done from there
-        displayFSM();
-    }
-}
 
-// ###################################################################################
-// End Main()
-// ###################################################################################
+    InitADC(ADC_TEMP);
+    InitRtc();
+    ReadConfig();
+    configFlags = config.flags;
+    InitTimer0();
 
-// Alarm delay routine
-// Call with number of 3ms ticks to wait
-// Max is 3ms * 255 = 7.65 seconds delay
-
-void alarmDelay(uint8_t ticks)
-{
-    userTimer3 = ticks;
-    while (userTimer3)
-        updateClock();
-}
-
-void checkAlarm()
-{
-#if OPT_ALARM
-    while(soundAlarm){
-        BZR_ON;
-        alarmDelay(66);         // 200ms
-        BZR_OFF;
-        alarmDelay(33);         // 100ms
-        BZR_ON;
-        alarmDelay(66);         // 200ms
-        BZR_OFF;
-#if HAS_NY3P_SPEECH
-        speakItem(sndRing);
-        if (checkAndClearS3()){
+#ifdef TEST_DEFAULTS
+    ResetRtc();
 #else
-        alarmDelay(225);        // 675ms
-        if (checkAndClearS1()){
+    if (config.magic != CONFIG_MAGIC || CheckResetPressed())
+    {
+        ResetRtc();
+    }
 #endif
-            soundAlarm = FALSE;
-            break;
+
+#if HAS_NY3P_SPEECH
+    InitSpeech();
+#endif
+
+    while (TRUE)
+    {
+        digit[0] = 0;
+        digit[1] = 0;
+        digit[2] = 0;
+        digit[3] = 0;
+
+        UpdateBuzzer(displayState == stClock);
+        ReadSensors();
+
+        if (displayState != stClock)
+        {
+            if (pressedS1 || pressedS2)
+            {
+                setupTimeout = SETUP_TIMEOUT;
+                userTimer100 = 10;
+            }
+            else if (userTimer100 == 0)
+            {
+                if (setupTimeout != 0)
+                {
+                    setupTimeout--;
+                    userTimer100 = 10;
+                }
+
+                // setup mode ignored too long, abort setup
+                if (setupTimeout == 0)
+                {
+                    displayState = stClock;
+                    userTimer100 = 0;
+                }
+            }
         }
-    }
-#endif
-}
 
-// checkChime - convert current time and chime S/S to 24 hour format
-// then setup proper start/stop order and compare to see if chime
-// should sound
-
-void checkChime()
-{
-    uint8_t tCurrent,tStart,tStop;
-    __bit tFormat;
-    tFormat = Select_12;
-    changeTimeFormat(FALSE);    // convert to 24 hour (maybe)
-    tCurrent = clockRam.hr;
-    tStart = clockRam.chimeStartHour;
-    tStop = clockRam.chimeStopHour;
-    changeTimeFormat(tFormat);    // convert back to entry state
-    if (tStop >= tStart) {
-        if (tCurrent >= tStart && tCurrent <= tStop)
-            soundChime();
-    } else {
-        if (tCurrent >= tStart || tCurrent <= tStop)
-            soundChime();
-    }
-}
-
-// soundChime - Toggle the buzzer on and off at alarm rate only once.
-// The buzzer has its own native frequency when +5 volts is applied.
-// The polarity is usually low to sound buzzer so the constants
-// BZR_ON and BZR_OFF are usually inverted (ON = 0, OFF = 1)
-// This routine must consume more than 1000ms else it will refire
-// when it returns since time will still be 00:00
-
-void soundChime()
-{
-
-#if OPT_CHIME && !HAS_NY3P_SPEECH
-    BZR_ON;
-    delay3(66);         // 200ms
-    BZR_OFF;
-    delay3(33);         // 100ms
-    BZR_ON;
-    delay3(66);         // 200ms
-    BZR_OFF;
-    delay3(250);        // 750ms for 1050ms total
-#elif OPT_CHIME && HAS_NY3P_SPEECH
-    speakItem(sndChime);        // updates display, returns when finished
+#if HAS_NY3P_SPEECH
+        if (displayState == stClock && pressedS3)
+        {
+            speakTime();
+            pressedS3 = FALSE;
+        }
 #endif
 
+        ClockStateMachine();
+        CommitDisplay();
+    }
 }
-

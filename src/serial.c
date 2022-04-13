@@ -1,64 +1,155 @@
-
-#include <stdint.h>
+// project definitions
 #include "global.h"
-#include "stc15.h"
+
+#ifdef DEBUG
+
+// definitions for this file
 #include "serial.h"
 
-#if DEBUG
+// other local headers
+// (none)
 
-#define S1_S0 0x40              //P_SW1.6
-#define S1_S1 0x80              //P_SW1.7
+// system headers
+#include "stc15.h"
+#include <stdio.h>
 
-volatile __bit txBusy;
+// AUXR bits
+#define T0DIV1  0x80  // T0x12
+#define T1DIV1  0x40  // T1x12
+#define S1DIV2  0x20  // UART_M0x6
+#define T2RUN   0x10  // T2R
+#define T2COUNT 0x08  // T2_C/nT
+#define T2DIV1  0x04  // T2x12
+#define NAUXRAM 0x02  // EXTRAM
+#define S1ST2   0x01
 
-void initSerial()
+// AUXR1/P_SW1 bits
+#define S1_S1   0x80
+#define S1_S0   0x40
+
+// At 115200 bps, each bit takes ~8.68 us.
+// Each byte (start, 8 data bits, stop) takes almost 87 us.
+
+void InitSerial(void)
 {
-    ACC = P_SW1;
-    ACC &= ~(S1_S0 | S1_S1);        // S1_S0=1 S1_S1=0
-    ACC |= S1_S0;                   // P3.6/RxD_2, P3.7/TxD_2
-    P_SW1 = ACC;
-    SCON  = 0x40;                	// xmit only & 8 bit variable baud rate uart
-    T2H   = (65536-(FOSC/BAUD/4) >> 8);		// baud rate high
-    T2L   = (65536-(FOSC/BAUD/4) & 0xFF);	// baud rate low
-    ACC = AUXR;
-    ACC |= 0x15;                    // T2 is 1T mode, start timer 2, T2 = uart clock
-    AUXR = ACC;                     // Select Timer 2 as the baud rate generator for serial port 1
-    ES = 1;                         // Enable serial port 1 interrupt
-    PS = 1;                         // set serial int priority
-    EA = 1;                         // insure interrupts are on
+    // SCON register
+    // 8-bit UART, variable baud rate
+    SM0 = 0;
+    SM1 = 1;
+    // REN (receive enable) is left at its default of 0.
+
+    // AUXR1/P_SW1 register
+    // S1_S1 = 0, S1_S0 = 0: UART1 on P3.0/P3.1
+    // S1_S1 = 0, S1_S0 = 1: UART1 on P3.6/P3.7
+    // S1_S1 = 1, S1_S0 = 0: UART1 on P1.6/P1.7
+    P_SW1 = (P_SW1 & ~(S1_S1)) | (S1_S0);
+
+    // When UART1 uses Timer 2 in 1T mode:
+    // baud = SYSclk / (65536 - reloadValue) / 4
+    #define BAUD 115200
+    #define T2RELOAD (65536 - (FOSC / (BAUD * 4)))
+    T2H = T2RELOAD >> 8;
+    T2L = T2RELOAD & 0xff;
+
+    // AUXR register
+    // * select Timer 2 as the baud-rate generator of UART1
+    // * clock source of Timer 2 is SYSclk / 1
+    // * run Timer 2
+    AUXR |= (S1ST2 | T2DIV1 | T2RUN);
+
+    // IE (interrupt enable) register
+    // PS is left at its default of 0 (low UART1 interrupt priority).
+    ES = 1;         // enable serial port 1 interrupt
+    EA = 1;         // enable interrupts
 }
 
-// UART Interrupt service routine
+static char txQueue[8];
+static uint8_t txStart;
+static uint8_t txCount;
+static __bit txBusy;
 
-void Uart() __interrupt 4 __using 1
+void ISR_UART1(void) __interrupt 4 __using 1
 {
-    if (RI){
-        RI = 0;                 // Clear the RI bit
+    if (RI)
+    {
+        RI = 0;
     }
-    if (TI){
-        TI = 0;                 // Clear the TI bit
-        txBusy = 0;             // Busy sign
+
+    if (TI)
+    {
+        TI = 0;
+
+        if (txCount == 0)
+        {
+            txBusy = 0;
+        }
+        else
+        {
+            SBUF = txQueue[txStart];
+            txStart = (txStart + 1) & 7;
+            txCount--;
+        }
     }
 }
 
-// Send serial data
-
-void putchar(uint8_t dat)
+void PrintChar(uint8_t c)
 {
-    while (txBusy)
-    __asm__ ("\tnop\n");   // Waiting for the previous data to be sent
-    txBusy = 1;
-    SBUF = dat;                 // Write data to the UART data register
+    while (txCount == 8)
+    {
+        // wait until queue is not full
+    }
+
+    ES = 0;
+
+    if (txBusy)
+    {
+        txQueue[(txStart + txCount) & 7] = c;
+        txCount++;
+    }
+    else
+    {
+        txBusy = 1;
+        SBUF = c;
+    }
+
+    ES = 1;
 }
 
-// Send a string
-
-void sendString(char *s)
+static void PrintHexDigit(uint8_t n)
 {
-    while (*s)
-    {                  // Detect the string end flag
-        putchar(*s++);          // Send the current character
+    n += (n > 9) ? ('A' - 10) : '0';
+    PrintChar(n);
+}
+
+void PrintHex(uint8_t value)
+{
+    PrintHexDigit(value >> 4);
+    PrintHexDigit(value & 0x0f);
+}
+
+void PrintString(const char * s)
+{
+    while (*s != '\0')
+    {
+        PrintChar(*s);
+        s++;
     }
 }
 
-#endif
+// See function prototype in <stdio.h>
+int putchar(int c)
+{
+    PrintChar(c);
+    return c;
+}
+
+#else  // not DEBUG
+
+// This function compiles to a single 1-byte 'ret' instruction.
+// Its presence avoids an "empty source file" warning.
+void InitSerial(void)
+{
+    // nothing
+}
+
+#endif // DEBUG (entire file)

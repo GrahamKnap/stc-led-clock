@@ -1,89 +1,30 @@
-
 #ifndef _DS1302_H
 #define _DS1302_H
 
-/*
-typedef enum {
-    kSunday    = 1,
-    kMonday    = 2,
-    kTuesday   = 3,
-    kWednesday = 4,
-    kThursday  = 5,
-    kFriday    = 6,
-    kSaturday  = 7
-} Day;
-*/
-
-enum Register {
-  kSecondReg       = 0,
-  kMinuteReg       = 1,
-  kHourReg         = 2,
-  kDateReg         = 3,
-  kMonthReg        = 4,
-  kDayReg          = 5,
-  kYearReg         = 6,
-  kWriteProtectReg = 7,
-};
-
-enum Command {
-  kClockBurstWrite = 0xBE,
-  kClockBurstRead  = 0xBF,
-  kRamBurstWrite   = 0xFE,
-  kRamBurstRead    = 0xFF
-};
+#include <stdint.h>
 
 // Time structure as used by DS1302
-// These values are BCD!
+// We always store the time in 24-hour format.
+// It can be displayed in 12-hour format when needed.
 
-struct Clock {
-    uint8_t sec;            // seconds. Range: {0...59}
-    uint8_t min;            // minutes. Range: {0...59}
-    uint8_t hr;             // hours.   Range: {0...23} or {1...12}
-    uint8_t date;           // dom.     Range: {1...31}
-    uint8_t mon;            // month.   Range: {1...12}
-    uint8_t day;            // dow      Range: {1...7}  Sunday = 1;
-    uint8_t yr;             // year.    Range: {00...99}
-    uint8_t check0;         // 0xAA     check0 xor check1 = 0xFF
-    uint8_t check1;         // 0x55
-    uint8_t statusBits;     // Pack all into one byte (no bool's allowed)
-    uint8_t almHour;        // {0...23} or {1...12} in bcd
-    uint8_t almMin;         // {0...59} in bcd
-    uint8_t chimeStartHour; // {0...23} or {1...12} in bcd
-    uint8_t chimeStopHour;  // {0...23} or {1...12} in bcd
-    uint8_t brightMax;      // {1...50} in bcd
-    uint8_t brightMin;      // {1...50} in bcd
-    int8_t  tempOffset;     // constrain range to +/- 15
-};
+typedef struct CLOCK_T {
+    uint8_t second;         // [0] BCD; 0x00..0x59
+    uint8_t minute;         // [1] BCD; 0x00..0x59
+    uint8_t hour;           // [2] BCD; 0x00..0x23
+    uint8_t date;           // [3] day of month; BCD; 0x01..0x31
+    uint8_t month;          // [4] BCD; 0x01..0x12
+    uint8_t weekday;        // [5] 1..7
+    uint8_t year;           // [6] BCD; 0x00..0x99
+    uint8_t wp;             // [7] write-protect register
+} CLOCK;
 
-#define clockSize   7
-#define configSize 10
-#define totalSize clockSize + configSize
+extern CLOCK clock;
 
-// bit definitions used in status bits
-//
-#define kAlarmOn     0x01        // alarm On/Off status
-#define kChimeOn     0x02        // chime On/Off status
-#define kTempOn      0x04        // Temperature Display On/Off status
-#define kDateOn      0x08        // Date display On/Off status
-#define kDowOn       0x10        // Day of Week On/Off status
-#define kSelect_FC   0x20        // select degrees F or C
-#define kSelect_MD   0x40        // select month:day display format MM:DD or DD:MM
-#define kSelect_12   0x80        // = 1 when 12 hr mode
-
-// External module usage:
-void    getClock();
-void    putClock();
-void    refreshTime();
-void    initRtc();
-void    initColdStart();
-
-// Internal module use only
-
-void    wait500();
-void    reset_3w();
-void    wbyte_3w(uint8_t W_Byte);
-uint8_t	rbyte_3w();
-void	getConfigRam();
-void	putConfigRam();
+void ReadClock(void);
+void WriteClock(void);
+void WriteDate(void);
+void InitRtc(void);
+void ReadConfig(void);
+void WriteConfig(void);
 
 #endif

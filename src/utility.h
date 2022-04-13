@@ -2,17 +2,18 @@
 #ifndef _UTILITY_H
 #define _UTILITY_H
 
-extern __bit timeChanged;
+#include <stdint.h>
 
-uint8_t mapLDR(int16_t x);
-uint8_t mapTemp(int16_t x);
-uint8_t map();
+uint8_t MapBrightness(uint8_t adcValue);
+uint8_t DecodeTemperature(uint8_t adcValue);
 
-uint8_t bcdToDec(uint8_t bcd);
-uint8_t decToBcd(uint8_t dec);
+uint8_t BcdToDec(uint8_t bcd);
+uint8_t DecToBcd(uint8_t dec);
 
-uint8_t toFormat12(uint8_t);
-uint8_t toFormat24(uint8_t);
-void changeTimeFormat(__bit);
+uint8_t IncrementBcd(uint8_t value);
+uint8_t IncrementHours(uint8_t h);
+uint8_t IncrementMinutes(uint8_t m);
+uint8_t ConvertHours(uint8_t h);
+uint8_t DaysInMonth(uint8_t m);
 
 #endif

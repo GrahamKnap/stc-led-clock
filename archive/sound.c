@@ -1,11 +1,16 @@
-
-#include <stdint.h>
+// project definitions
 #include "global.h"
-#include "stc15.h"
+
+// definitions for this file
+#include "sound.h"
+
+// other local headers
 #include "display.h"
 #include "utility.h"
 #include "ds1302.h"
-#include "sound.h"
+
+// system headers
+#include "stc15.h"
 
 #if HAS_NY3P_SPEECH
 
@@ -14,8 +19,8 @@ void speakTime()
     uint8_t h,m;
 
     if (Select_12){
-        h = bcdToDec(clockRam.hr & 0x1F);
-        m = bcdToDec(clockRam.min);
+        h = bcdToDec(clock.hour & 0x1F);
+        m = bcdToDec(clock.minute);
         if ( m == 0 ){
         // just speak hour and AM/PM
             speakItem(h);
@@ -44,15 +49,15 @@ void speakTime()
     }
 
     if (!Select_12){ // 24 hour time here
-        h = bcdToDec(clockRam.hr);
-        m = bcdToDec(clockRam.min);
+        h = bcdToDec(clock.hour);
+        m = bcdToDec(clock.minute);
         if ( m == 0 ){
         // just speak hour and ohClock
             speakItem(h);
             speakItem(sndOhClock);
         }
         else if ( m >= 1 & m <= 9){
-        // hour + "oh" + "nine"
+        // hour + "oh" + minute
             speakItem(h);
             speakItem(sndOh);
             speakItem(m);
@@ -63,7 +68,7 @@ void speakTime()
             speakItem(m);
         }
         else {//if ( m >= 21 & m <= 59)
-        // hour + minuteTems + minute
+        // hour + minuteTens + minute
             speakItem(h);
             speakItem(m/10+sndTwenty-2);
             speakItem(m % 10);
@@ -115,5 +120,5 @@ void resetSound()
     waitS1Clk();
 }
 
-#endif
+#endif // HAS_NY3P_SPEECH
 

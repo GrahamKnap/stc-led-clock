@@ -1,249 +1,228 @@
-
-#include <stdint.h>
+// project definitions
 #include "global.h"
-#include "stc15.h"
-#include "ds1302.h"
-#include "adc.h"
+
+// definitions for this file
 #include "timer.h"
+
+// other local headers
+#include "chime.h"
 #include "display.h"
-#if DEBUG
-#include "serial.h"
-#include "stdio.h"  // used for debug only
+#include "ds1302.h"
+
+// system headers
+#include "stc15.h"
+
+// AUXR bits
+#define T0DIV1  0x80  // T0x12
+#define T1DIV1  0x40  // T1x12
+#define S1DIV2  0x20  // UART_M0x6
+#define T2RUN   0x10  // T2R
+#define T2COUNT 0x08  // T2_C/nT
+#define T2DIV1  0x04  // T2x12
+#define NAUXRAM 0x02  // EXTRAM
+#define S1ST2   0x01
+
+
+#define T0FREQ          25000
+#define TICKS_PER_MS    (T0FREQ / 1000)
+
+#define SW_PRESS_TIME   40  // ms
+#define SW_REPEAT_TIME  180 // ms
+
+
+volatile uint8_t userTimer100;  // user delay in 100ms ticks (25.5 seconds max)
+volatile uint8_t clockTenths;   // approximate tenths of a second
+
+__bit pressedS1;          // true when pressed, user clears
+__bit pressedS2;          // true when pressed, user clears
+
+#ifdef S3
+__bit pressedS3;          // true when pressed, user clears
 #endif
 
-volatile uint8_t    _3msTimer;          // in timer 0 ticks (max 12.8ms at 50us)
-volatile uint8_t    _10msTimer;         // rolls over every 10ms
-volatile uint8_t    _100msTimer;        // increments, blinks display at 5hz
-volatile uint8_t    _500msTimer;        // increments, blinks ":" seperator at 1hz
-volatile uint8_t    userTimer100;       // user delay in 100ms ticks (25.5 seconds max)
-volatile uint8_t    userTimer3;         // user delay in 3ms ticks 765ms max (3*255)
+__bit fastFlashState;
 
-volatile uint8_t    stateQueueS1;       // holds 5 key states
-volatile __bit      pressedS1;          // true when pressed, user clears
+// used for detecting S2 auto-repeat to
+// prevent constant flashing of display while changing
+__bit flashStateS2;
 
-volatile uint8_t    stateQueueS2;       // pressed, released, etc.
-volatile __bit      pressedS2;          // true when pressed, user clears
 
-volatile uint8_t    keyRepeatTimer;     // sets repeat time (in 10ms ticks)
-
-#if HAS_NY3P_SPEECH
-volatile uint8_t    stateQueueS3;       // holds 5 key states
-volatile __bit      pressedS3;          // true when pressed, user clears
-volatile uint8_t    soundTimer;         // typically set to 10 ticks (500us)
-#endif
-
-__bit _1hzToggle;   // 500 ms pulse width (blinks : in display)
-__bit _5hzToggle;   // 100 ms used to blink digits being set
-
-void initTimer0(void)       // 50us @ 22.1184mhz
+void InitTimer0(void)
 {
-    AUXR |= 0x80;   // set to clock div 1 without trashing other bits
-    TH0 = (65536-(FOSC/T0TICKS)) >> 8;
-    TL0 = (65536-(FOSC/T0TICKS)) & 0xFF;
-    TF0 = 0;        // Clear TF0 flag
+    AUXR |= T0DIV1; // The clock source of Timer 0 is SYSclk/1
+    TH0 = (65536 - (FOSC / T0FREQ)) >> 8;
+    TL0 = (65536 - (FOSC / T0FREQ)) & 0xFF;
+    TF0 = 0;        // Clear overflow flag
     TR0 = 1;        // Timer0 start run
+    PT0 = 1;        // high interrupt priority
     ET0 = 1;        // enable timer0 interrupt
     EA  = 1;        // global interrupt enable
 }
 
-void timer0_isr() __interrupt (1)
+static void UpdateClockTenths(void)
 {
-    // Here on every timer roll-over (50us).
+    // Approximately synchronize to the clock, when possible.
+    // In most setup modes, the clock is not read/updated.
+    // Synchronize only if the clock appears to be regular.
+    //
+    // For STC15 MCUs, the internal clock is accurate to +/- 0.3%
+    // or 3000 ppm, or a maximum error of +/- 3 ms per second.
+    // The 32.768 KHz clock crystal is likely accurate to ~100 ppm.
+    static uint8_t milliseconds = 100;
+    static uint8_t prevSeconds;
+    static uint8_t syncTimer;
 
-    // Tell display code a timer tick has occurred.
-    // Response is:
-    // Just increment counter and return if during anode ON time
-    // If time on period has expired, turn off anode driver and contiune counting
-    // unitl at end of cycle (MaxOnTime)
+    if (prevSeconds != clock.second)
+    {
+        prevSeconds = clock.second;
 
-    displayUpdateISR();
-
-    // handle various time based tasks
-    // User key press handler, call every 3ms
-
-    if (!_3msTimer--){
-        _3msTimer = 3 * TICKS_MS;
-        if (userTimer3) userTimer3--;
-    }
-    if (!_10msTimer--) {
-        _10msTimer = 10 * TICKS_MS;
-        debounceSwitches();
-        if (keyRepeatTimer) keyRepeatTimer--;
-        if (!_100msTimer--) {
-            _100msTimer = 10;
-            _5hzToggle =! _5hzToggle;
-            if (userTimer100) userTimer100--;
+        if (syncTimer == 9 || syncTimer == 10)
+        {
+            milliseconds = 100;
+            clockTenths = 0;
         }
-        if (!_500msTimer--) {
-            _500msTimer = 50;
-            _1hzToggle =! _1hzToggle;
+
+        syncTimer = 0;
+    }
+
+    // clock sync and tenths of a second
+    milliseconds--;
+
+    if (milliseconds == 0)
+    {
+        milliseconds = 100;
+        if (syncTimer < 255) syncTimer++;
+        clockTenths = (clockTenths < 9) ? (clockTenths + 1) : 0;
+    }
+
+    fastFlashState = (clockTenths & 1);
+}
+
+static void UpdateUserTimer(void)
+{
+    // Counts 100ms intervals for userTimer100.
+    // Not synchronized to the clock.
+    static uint8_t milliseconds = 0;
+
+    if (userTimer100 == 0)
+    {
+        milliseconds = 0;
+    }
+    else
+    {
+        milliseconds++;
+
+        if (milliseconds >= 100)
+        {
+            milliseconds = 0;
+            userTimer100--;
         }
     }
-  #if HAS_NY3P_SPEECH
-    if (soundTimer) soundTimer--;
-  #endif
-
 }
 
-// User delay routine
-// Call with number of 10ms ticks to wait
-// Max is 10ms * 255 = 2.55 seconds delay
-
-void delay3(uint8_t ticks)
+static void DebounceButtons(void)
 {
-    userTimer3 = ticks;
-    while (userTimer3)
-    ;
-}
-
-void debounceSwitches(void)
-{
-    // Called from Timer ISR code.
-    // Update pushbutton state tables every 10ms.
-    // Uses negative logic (pressed = 0)
-    // State consists of 5 past events and when key is true for 50ms (5*10)
-    // the current state will = F0.
-
-    // sw1
-    stateQueueS1 = stateQueueS1<<1 | S1 | K_HELD;
-    if (stateQueueS1 == K_PRESSED) pressedS1 = TRUE;
-
-    // sw2
-    stateQueueS2 = stateQueueS2<<1 | S2 | K_HELD;
-    if ((stateQueueS2 == K_HELD) & (!keyRepeatTimer)){
-        keyRepeatTimer = KEY_REPEAT;        // 150ms (1 tick = 10ms)
-        pressedS2 = TRUE;
-    }
-
-#if HAS_NY3P_SPEECH
-    // sw3
-    stateQueueS3 = stateQueueS3<<1 | S3 | K_HELD;
-    if (stateQueueS3 == K_PRESSED) pressedS3 = TRUE;
-#endif
-}
-
-// Used at power up to detect user reset
-// S1 and S2 must be held down to effect reset
-
-__bit checkForReset()
-{
-
-    if ((stateQueueS1 == K_HELD) & (stateQueueS2 == K_HELD))
-        return TRUE;
-    else
-        return FALSE;
-}
-
-// Used at power up to detect key release after reset
-
-__bit checkForRelease()
-{
-    pressedS1 = FALSE;
-    pressedS2 = FALSE;
-    if ((stateQueueS1 == K_RELEASED) & (stateQueueS2 == K_RELEASED))
-        return FALSE;   // use neg logic to avoid negation of value
-    else
-        return TRUE;    // got it?
-}
-
-
-// return the current queue back to caller
-// used for detecting S2 auto-repeat to
-// prevent constant flashing of display while changing
-
-__bit getStateS2Flasher()
-{
-    if ( stateQueueS2 == K_HELD )
-        return TRUE;
-    else
-        return _5hzToggle;
-}
-
-// Check if S1 pressed. Return TRUE and clear key events if so.
-// Return FALSE if no key pressed.
-
-__bit checkAndClearS1()
-{
-    if (pressedS1){
-        pressedS1 = FALSE;
-        return TRUE;
-    }
-    else
-        return FALSE;
-}
-
-// Check if S2 pressed. Return TRUE and dump key events if so.
-// Return FALSE if no key pressed.
-
-__bit checkAndClearS2()
-{
-    if (pressedS2){
-        pressedS2 = FALSE;
-        return TRUE;
-    }
-    else
-        return FALSE;
-}
-
-// Check if S3 pressed. Return TRUE and dump key events if so.
-// Return FALSE if no key pressed.
+    static uint8_t switchTimer1;
+    static uint8_t switchTimer2;
 
 #ifdef S3
-
-__bit checkAndClearS3()
-{
-    if (pressedS3){
-        pressedS3 = FALSE;
-        return TRUE;
-    }
-    else
-        return FALSE;
-}
-
+    static uint8_t switchTimer3;
 #endif
 
-// Check if S1 pressed. Set new state if true.
+    // S1 is non-repeating
+    if (S1)
+    {
+        // button not pressed (active low)
+        switchTimer1 = 0;
+    }
+    else
+    {
+        if (switchTimer1 < 255) switchTimer1++;
+        if (switchTimer1 == SW_PRESS_TIME) pressedS1 = TRUE;
+    }
 
-void stateSwitchWithS1(uint8_t newState)
+    // S2 is repeating
+    if (S2)
+    {
+        // button not pressed (active low)
+        switchTimer2 = 0;
+    }
+    else
+    {
+        switchTimer2++;
+
+        if (switchTimer2 == SW_PRESS_TIME)
+        {
+            pressedS2 = TRUE;
+        }
+        else if (switchTimer2 >= (SW_PRESS_TIME + SW_REPEAT_TIME))
+        {
+            switchTimer2 = SW_PRESS_TIME;
+            pressedS2 = TRUE;
+        }
+    }
+
+    flashStateS2 = fastFlashState || (switchTimer2 >= SW_PRESS_TIME);
+
+#ifdef S3
+    // S3 is non-repeating
+    if (S3)
+    {
+        // button not pressed (active low)
+        switchTimer3 = 0;
+    }
+    else
+    {
+        if (switchTimer3 < 255) switchTimer3++;
+        if (switchTimer3 == SW_PRESS_TIME) pressedS3 = TRUE;
+    }
+#endif
+}
+
+void ISR_Timer0(void) __interrupt (1)
 {
-    if (pressedS1){
-        pressedS1 = FALSE;
-        displayState = newState;
+    DisplayUpdateISR();
+
+    static uint8_t timer1ms = TICKS_PER_MS;
+
+    timer1ms--;
+
+    // TICKS_PER_MS is assumed to be larger than the final case value here.
+    if (timer1ms == 0)
+    {
+        timer1ms = TICKS_PER_MS;
+        UpdateClockTenths();
+    }
+    else if (timer1ms == 1)
+    {
+        DebounceButtons();
+    }
+    else if (timer1ms == 2)
+    {
+        UpdateUserTimer();
+    }
+    else if (timer1ms == 3)
+    {
+        BuzzerControlISR();
     }
 }
 
-void stateSwitchExtendedWithS1(uint8_t newState, uint8_t text2, __bit flag)
+__bit CheckResetPressed(void)
 {
-    if (pressedS1){
-        pressedS1 = FALSE;
-        displayState = newState;
-        // if the flag is off, goto OFF state (-1)
-        if (!flag)
-            displayState--;
-        if ( text2 != NoText2 )
-            setHourDigits(text2);
-    }
-}
+    userTimer100 = 2;
 
-// Check if S2 pressed. Set new state if true.
-
-void stateSwitchWithS2(uint8_t newState)
-{
-    if (pressedS2){
-        pressedS2 = FALSE;
-        displayState = newState;
+    while (userTimer100 != 0)
+    {
+        // wait for keypresses to accumulate
     }
-}
 
-void stateSwitchExtendedWithS2(uint8_t newState, uint8_t text2, __bit flag)
-{
-    if (pressedS2){
-        pressedS2 = FALSE;
-        displayState = newState;
-        // if the flag is off, goto OFF state (-1)
-        if (!flag)
-            displayState--;
-        if ( text2 != NoText2 )
-            setHourDigits(text2);
+    while (!S1 || !S2)
+    {
+        // wait for switches released
     }
+
+    __bit result = pressedS1 && pressedS2;
+    pressedS1 = FALSE;
+    pressedS2 = FALSE;
+    return result;
 }

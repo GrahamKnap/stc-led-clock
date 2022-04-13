@@ -7,8 +7,15 @@
 #ifdef REG8051_H
 #undef REG8051_H
 #endif
-/*  P5  */
+
+/*  P5 (6-bit)  */
 __sfr  __at (0xC8) P5;
+__sbit __at (0xC8) P5_0;
+__sbit __at (0xC9) P5_1;
+__sbit __at (0xCA) P5_2;
+__sbit __at (0xCB) P5_3;
+__sbit __at (0xCC) P5_4;
+__sbit __at (0xCD) P5_5;
 
 /*  P4  */
 __sfr  __at (0xC0) P4;

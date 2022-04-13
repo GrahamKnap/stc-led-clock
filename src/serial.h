@@ -1,12 +1,22 @@
-
 #ifndef _SERIAL_H
 #define _SERIAL_H
 
-void Uart() __interrupt 4 __using 1;
+#include "global.h"
 
-void initSerial();
-void sendString(char *s);
-void sendData(uint8_t dat);
-void putchar(uint8_t dat);
+void InitSerial(void);
 
-#endif
+#ifdef DEBUG
+
+#include <stdint.h>
+
+// SDCC requires that "a prototype of the ISR must be present or included in
+// the file that contains the function 'main'"
+void ISR_UART1(void) __interrupt 4 __using 1;
+
+void PrintChar(uint8_t c);
+void PrintHex(uint8_t value);
+void PrintString(const char * s);
+
+#endif // DEBUG
+
+#endif // _SERIAL_H

@@ -1,304 +1,303 @@
+// DS1302 pin mappings must be defined in "global.h".
+// For each of CE/SCK/IO:
+//
+// * If the pin is addressable by sbit (typical):
+//
+//   #define DS1302_xx_SBIT P1_0
+//
+// * Otherwise, if it's only addressable by byte sfr (rare):
+//
+//   #define DS1302_xx_SFR P5
+//   #define DS1302_xx_BIT 5
 
-#include <stdint.h>
-#include "stc15.h"
 #include "global.h"
+
+// definitions for this file
 #include "ds1302.h"
-#if DEBUG
-#include "serial.h"
-#include "stdio.h"  // used for debug only
-#endif
 
-struct Clock clockRam;
+// other local headers
+// "config.h" is expected to declare a structure variable called "config".
+#include "config.h"
 
-// Declare this byte absolute 0x2F which memory maps it in the 8051's bit space
-// begining at 0x78. Then declare the bits used in that byte so they can be accessed
-// without having to mask and shift...
+// system headers
+#include <stddef.h>
+#include "stc15.h"
 
-uint8_t __at 0x2F configBitReg;
-__bit __at 0x78 AlarmOn;    // alarm On/Off status
-__bit __at 0x79 ChimeOn;    // chime On/Off status
-__bit __at 0x7A TempOn;     // Temperature Display On/Off status
-__bit __at 0x7B DateOn;     // Date display On/Off status
-__bit __at 0x7C DowOn;      // Day of Week On/Off status
-__bit __at 0x7D Select_FC;  // select degrees F or C
-__bit __at 0x7E Select_MD;  // select month:day display format MM:DD or DD:MM
-__bit __at 0x7F Select_12;  // = 1 when 12 hr mode
+// project globals
+CLOCK clock;
 
-void wait500()
-{
-    // the call overhead + 4 nops = 500ns
-    __asm__ ("\tnop\n\tnop\n\tnop\n");
-}
 
-// Reset and enable the 3-wire interface
-// Exits with SCLK LOW and CE HIGH (selected)
+// DS1302 command byte bit assignments:
+//   7: always 1
+//   6: 0 = clock/calendar, 1 = RAM
+// 5-1: address
+//   0: 0 = write, 1 = read
+#define DS1302_CMD(ram_clk, addr, rd_wr) \
+    (0x80 | ((ram_clk) ? 0x40 : 0) | ((uint8_t)(addr) << 1) | ((rd_wr) ? 0x01 : 0))
 
-void reset_3w()
-{
-    SCLK = 0;
-    CE_LO;
-  __asm__ ("\tlcall\t_wait500\n");
-    CE_HI;
-}
+// The high-order bit is transmitted last, and is always 1.
+// Writing 1 to an 8051 quasi-bidirectional I/O pin enables a weak pull-up,
+// allowing the pin to function as an input.
 
-// Write one byte to the DS1302
-//
-//  Exits with SCLK HIGH, IO in last state
+#define DS1302_CLK      0
+#define DS1302_RAM      1
 
-void wbyte_3w(uint8_t W_Byte)
-{
-    uint8_t i;
+#define DS1302_SECOND   0
+#define DS1302_MINUTE   1
+#define DS1302_HOUR     2
+#define DS1302_DATE     3
+#define DS1302_MONTH    4
+#define DS1302_WEEKDAY  5
+#define DS1302_YEAR     6
+#define DS1302_CONTROL  7
+#define DS1302_TRICKLE  8
+#define DS1302_BURST    31
 
-    for(i = 0; i < 8; ++i){
-#ifdef IO
-        IO = 0;                 // do not remove!
-        IO = (W_Byte & 0x01);
+#define DS1302_WRITE    0
+#define DS1302_READ     1
+
+
+// Macros for accessing CE/SCK/IO pins
+#define CONCAT(a,b)         a ## b
+#define ASM_NAME(name)      CONCAT(_,name)
+
+#ifdef DS1302_CE_SBIT
+    #define ASM_CE_LO       clr ASM_NAME(DS1302_CE_SBIT)
+    #define ASM_CE_HI       setb ASM_NAME(DS1302_CE_SBIT)
+#elif defined(DS1302_CE_SFR) && defined(DS1302_CE_BIT)
+    #define CE_BIT_VAL      (1 << DS1302_CE_BIT)
+    #define ASM_CE_LO       anl ASM_NAME(DS1302_CE_SFR),#(~CE_BIT_VAL)
+    #define ASM_CE_HI       orl ASM_NAME(DS1302_CE_SFR),#(CE_BIT_VAL)
 #else
-        IO_LO;
-        IO_WR;
+    #error DS1302 CE pin not defined
 #endif
-  __asm__ ("\tlcall\t_wait500\n");
-        SCLK = 0;
-  __asm__ ("\tlcall\t_wait500\n");
-        SCLK = 1;               // write occurs on 0->1
-        W_Byte >>= 1;
-    }
-}
 
-// Read one byte from the DS1302
-//
-//  Exit with SCLK LOW
-
-uint8_t	rbyte_3w()
-{
-    uint8_t i;
-    uint8_t R_Byte;
-    uint8_t TmpByte;
-
-    R_Byte = 0x00;
-    for(i = 0; i < 8; i++){
-        SCLK = 1;               // read occurs on 1->0
-  __asm__ ("\tlcall\t_wait500\n");
-        SCLK = 0;               // wait for I/O pin to settle
-  __asm__ ("\tlcall\t_wait500\n");
-#ifdef IO
-        TmpByte = (uint8_t)IO;  // get new bit
+#ifdef DS1302_SCK_SBIT
+    #define ASM_SCK_LO      clr ASM_NAME(DS1302_SCK_SBIT)
+    #define ASM_SCK_HI      setb ASM_NAME(DS1302_SCK_SBIT)
+#elif defined(DS1302_SCK_SFR) && defined(DS1302_SCK_BIT)
+    #define SCK_BIT_VAL     (1 << DS1302_SCK_BIT)
+    #define ASM_SCK_LO      anl ASM_NAME(DS1302_SCK_SFR),#(~SCK_BIT_VAL)
+    #define ASM_SCK_HI      orl ASM_NAME(DS1302_SCK_SFR),#(SCK_BIT_VAL)
 #else
-        TmpByte = (uint8_t)IO_RD;
+    #error DS1302 SCK pin not defined
 #endif
-        TmpByte <<= 7;
-        R_Byte >>= 1;
-        R_Byte |= TmpByte;      // save parital byte
+
+#ifdef DS1302_IO_SBIT
+    #define ASM_IO_SBIT     ASM_NAME(DS1302_IO_SBIT)
+#elif defined(DS1302_IO_SFR) && defined(DS1302_IO_BIT)
+    #define ASM_IO_SFR      ASM_NAME(DS1302_IO_SFR)
+    #define IO_BIT_VAL      (1 << DS1302_IO_BIT)
+#else
+    #error DS1302 IO pin not defined
+#endif
+
+
+static void BeginComm(void) __naked
+{
+    __asm
+    ASM_SCK_LO
+    ASM_CE_LO
+    inc r7              // 4T delay with inc/dec pair (2 bytes)
+    dec r7
+    inc r7              // 4T delay with inc/dec pair (2 bytes)
+    dec r7
+    ASM_CE_HI
+    ret
+    __endasm;
+}
+
+static void EndComm(void) __naked
+{
+    __asm
+    ASM_SCK_LO
+    ASM_CE_LO
+    ret
+    __endasm;
+}
+
+static void SendByte(uint8_t x) __naked
+{
+    (void)x;            // avoid "unused parameter" warning
+
+    __asm
+    push ar6            // save registers
+    mov r6,#8           // loop counter
+    mov a,dpl           // data to send
+
+#ifdef DS1302_IO_SBIT
+SendLoop:
+    inc r7              // 4T delay with inc/dec pair (2 bytes)
+    dec r7
+    ASM_SCK_LO          // 3T
+    rrc a               // 1T discard low bit into carry
+    mov ASM_IO_SBIT,c   // 3T output
+    inc r7              // 4T delay with inc/dec pair (2 bytes)
+    dec r7
+    ASM_SCK_HI          // 3T DS1302 input on rising edge
+    djnz r6,SendLoop    // 4T
+#elif defined(DS1302_IO_SFR) && defined(DS1302_IO_BIT)
+SendLoop:
+    rrc a               // 1T discard low bit into carry
+    jc SendHi           // 3T
+    ASM_SCK_LO          // 3T
+    anl ASM_IO_SFR,#(~IO_BIT_VAL)   // 3T output lo
+    sjmp SentBit        // 3T
+SendHi:
+    ASM_SCK_LO          // 3T
+    orl ASM_IO_SFR,#(IO_BIT_VAL)    // 3T output hi
+    sjmp SentBit        // 3T equalize timing
+SentBit:
+    nop                 // 1
+    nop                 // 2
+    ASM_SCK_HI          // 3T DS1302 input on rising edge
+    djnz r6,SendLoop    // 4T
+#else
+    #error DS1302 IO pin not defined
+#endif
+
+    pop ar6             // restore registers
+    ret
+    __endasm;
+}
+
+static uint8_t RecvByte(void) __naked
+{
+    __asm
+
+#ifdef DS1302_IO_SBIT
+    mov a,#0x80         // bitwise loop-control value
+RecvLoop:
+    ASM_SCK_HI          // 3T DS1302 IO tristated on rising edge
+    inc r7              // 4T delay with inc/dec pair (2 bytes)
+    dec r7              // 
+    inc r7              // 4T delay with inc/dec pair (2 bytes)
+    dec r7              // 
+    ASM_SCK_LO          // 3T DS1302 output on falling edge
+    nop                 // 1
+    nop                 // 2
+    mov c,ASM_IO_SBIT   // 2T input
+    rrc a               // 1T shift new bit in, loop-control bit out
+    jnc RecvLoop        // 3T
+#elif defined(DS1302_IO_SFR) && defined(DS1302_IO_BIT)
+    push ar5            // save registers
+    mov r5,#0x80        // bitwise loop-control value
+    // "a" contains a random value; this is harmless
+RecvLoop:
+    ASM_SCK_HI          // 3T DS1302 IO tristated on rising edge
+    add a,#(256 - IO_BIT_VAL)   // 2T copy IO bit to C
+    mov a,r5            // 1T restore data received so far
+    rrc a               // 1T shift new bit in, loop-control bit out
+    inc r7              // 4T delay with inc/dec pair (2 bytes)
+    dec r7              // 
+    ASM_SCK_LO          // 3T DS1302 output on falling edge
+    mov r5,a            // 1T save data received so far
+    mov a,ASM_IO_SFR    // 2T input
+    anl a,#(IO_BIT_VAL) // 2T isolate IO bit
+    jnc RecvLoop        // 3T
+    add a,#(256 - IO_BIT_VAL)   // 2T copy IO bit to C
+    mov a,r5            // 1T restore data received so far
+    rrc a               // 1T shift new bit in
+    pop ar5             // restore registers
+#else
+    #error DS1302 IO pin not defined
+#endif
+
+    mov dpl,a           // return value
+    ret
+    __endasm;
+}
+
+static void ReadClockData(uint8_t count)
+{
+    uint8_t i, x;
+
+    BeginComm();
+    SendByte(DS1302_CMD(DS1302_CLK, DS1302_BURST, DS1302_READ));
+
+    for (i = 0; i < count; i++)
+    {
+        x = RecvByte();
+        ((uint8_t *)&clock)[i] = x;
     }
-    return R_Byte;
+
+    EndComm();
 }
 
-// Burst mode clock data registers from DS1302 and install in struct
-
-void getClock()
+void ReadClock(void)
 {
-    reset_3w();
-    wbyte_3w(kClockBurstRead);
-    __asm
-    mov     r2,#clockSize
-    mov     r1,#_clockRam
-L060:
-    lcall   _rbyte_3w
-    mov     @r1,dpl
-    inc     r1
-    djnz    r2,L060
-    __endasm;
-    reset_3w();
+    ReadClockData(sizeof(CLOCK));
 }
 
-// Burst mode ram struct to DS1302 clock data registers
-
-void putClock()
+void WriteDate(void)
 {
-    reset_3w();
-    wbyte_3w(kClockBurstWrite);
-    __asm
-    mov     r2,#clockSize
-    mov     r1,#_clockRam
-L070:
-    mov     dpl,@r1
-    lcall   _wbyte_3w
-    inc     r1
-    djnz    r2,L070
-    __endasm;
-    wbyte_3w(0);                // must write 8 bytes in burst mode
-    reset_3w();
+    // read the time, then write the entire clock
+    ReadClockData(offsetof(CLOCK, date));
+    WriteClock();
 }
 
-// Refresh only time from RTC
-// Used before puts that didn't affect time
-
-void refreshTime()
+void WriteClock(void)
 {
-    reset_3w();
-    wbyte_3w(kClockBurstRead);
-    __asm
-    mov     r2,#3               ; only want HR/Min/Sec
-    mov     r1,#_clockRam
-L075:
-    lcall   _rbyte_3w
-    mov     @r1,dpl
-    inc     r1
-    djnz    r2,L075
-    __endasm;
-    reset_3w();
+    uint8_t i, x;
+
+    clock.wp = 0;
+    BeginComm();
+    SendByte(DS1302_CMD(DS1302_CLK, DS1302_BURST, DS1302_WRITE));
+
+    for (i = 0; i < sizeof(CLOCK); i++)
+    {
+        x = ((uint8_t *)&clock)[i];
+        SendByte(x);
+    }
+
+    EndComm();
 }
 
-// Burst mode read DS1302 battery-backed ram into STC ram
-// This is the user's clock configuration data
-
-void getConfigRam()
+void ReadConfig(void)
 {
-    reset_3w();
-    wbyte_3w(kRamBurstRead);
-    __asm
-    mov     r2,#configSize
-    mov     r1,#_clockRam+7
-L080:
-    lcall   _rbyte_3w
-    mov     @r1,dpl
-    inc     r1
-    djnz    r2,L080
-    __endasm;
-    reset_3w();
-    // set all 8 bits in one whack
-    configBitReg = clockRam.statusBits;
+    uint8_t i, x;
+
+    BeginComm();
+    SendByte(DS1302_CMD(DS1302_RAM, DS1302_BURST, DS1302_READ));
+
+    for (i = 0; i < sizeof(config); i++)
+    {
+        x = RecvByte();
+        ((uint8_t *)&config)[i] = x;
+    }
+
+    EndComm();
 }
 
-// Burst mode write user ram back to the DS1302 ram
-// This is the user's clock configuration data
-
-void putConfigRam()
+void WriteConfig(void)
 {
-    reset_3w();
-    // push the user bits back into ram memory
-    clockRam.statusBits = configBitReg;
-    wbyte_3w(kRamBurstWrite);
-    __asm
-    mov     r2,#configSize
-    mov     r1,#_clockRam+7
-L090:
-    mov     dpl,@r1
-    lcall   _wbyte_3w
-    inc     r1
-    djnz    r2,L090
-    __endasm;
-    reset_3w();
+    uint8_t i, x;
+
+    BeginComm();
+    SendByte(DS1302_CMD(DS1302_RAM, DS1302_BURST, DS1302_WRITE));
+
+    for (i = 0; i < sizeof(config); i++)
+    {
+        x = ((uint8_t *)&config)[i];
+        SendByte(x);
+    }
+
+    EndComm();
 }
 
-// The coldstart initialization table.
-// Here you can set the reset at power up defaults to your liking.
-// Be sure to declare times in the proper DS1302 12/24 bit format
-// (that is for all hour values only) and remember that
-// everthing is in BCD format for the DS1302.
-//
-// Declaring invalid values will usually result in just strange
-// displays - but may cause crashes since the data is not validated.
-
-const uint8_t iniTable[] = {
-#if TEST_DEFAULTS
-        0x55,0x59,0xA7,                     // 07:59:55 pm
-        0x12,0x31,                          // date,month
-        0x01,                               // day of week
-        0x16,                               // year (unused)
-        0x55,0xAA,                          // checksum bytes
-        kSelect_12+kSelect_MD+kSelect_FC+ \
-        kAlarmOn+kChimeOn+                \
-        kTempOn+kDateOn+kDowOn,             // mode bits
-        0xA8,0x00,                          // 8:00pm alarm
-        0x88,                               // 8:00am chime start
-        0xA9,                               // 9:00pm chime stop
-        0x50,0x05,                          // brightness max.min (0x63 max)
-        0x00                                // temp offset
-#elif SET_12HR_FORMAT
-        0x55,0x59,0xA7,                     // 07:59:55 pm
-        0x12,0x31,                          // date,month
-        0x01,                               // day of week
-        0x16,                               // year (unused)
-        0x55,0xAA,                          // checksum bytes
-        kSelect_12+kSelect_MD+kSelect_FC,   // mode bits
-        0x88,0x00,                          // 8:00am alarm
-        0x88,                               // 8:00am chime start
-        0xA5,                               // 5:00pm chime stop
-        0x63,0x1,                           // brightness max.min (0x63 max)
-        0x00                                // temp offset
-#elif SET_24HR_FORMAT
-        0x55,0x59,0x19,                     // 19:59:55 pm
-        0x12,0x31,                          // date,month
-        0x01,                               // day of week
-        0x16,                               // year (unused)
-        0x55,0xAA,                          // checksum bytes
-        0x00,                               // mode bits
-        0x08,0x00,                          // 08:00 alarm
-        0x08,                               // 08:00 chime start
-        0x17,                               // 17:00 chime stop
-        0x63,0x1,                           // brightness max.min (0x63 max)
-        0x00                                // temp offset
-#endif
-};
-
-
-void initColdStart()
+void InitRtc(void)
 {
-    __asm
-    mov     r2,#clockSize+configSize
-    mov     r1,#0
-    mov     r0,#_clockRam
-	mov     dptr,#_iniTable
-L0100:
-    mov     a,r1
-    movc    a,@a+dptr
-    mov     @r0,a
-    inc     r0
-    inc     r1
-    djnz    r2,L0100
-    __endasm;
+    uint8_t t;
 
-    putClock();
-    configBitReg = clockRam.statusBits;
-    putConfigRam();
-}
-
-const uint8_t iniDS1302[] = {
-    0x8E,	    // control register
-    0x00,		// disable write protect
-    0x90,	    // trickle charger register
-    0x00,	    // everything off!!
-    0x81        // read seconds value
-};
-
-// --- Power up initization of the DS1302 RTC chip
-// --- initialize time & date from user entries ---
-
-void initRtc()
-{
-    uint8_t	t;
-
-    reset_3w();
-    __asm
-    mov     r2,#5
-    mov     r1,#_iniDS1302
-L110:
-    mov     dpl,@r1
-    lcall   _wbyte_3w
-    inc     r1
-    djnz    r2,L110
-    __endasm;
-    t = rbyte_3w();
+    BeginComm();
+    SendByte(DS1302_CMD(DS1302_CLK, DS1302_CONTROL, DS1302_WRITE));
+    SendByte(0);    // disable write-protect
+    SendByte(DS1302_CMD(DS1302_CLK, DS1302_TRICKLE, DS1302_WRITE));
+    SendByte(0);    // disable trickle-charge
+    SendByte(DS1302_CMD(DS1302_CLK, DS1302_SECOND, DS1302_READ));
+    t = RecvByte();
     t &= 0x7f;          // mask off clock halt bit
-    wbyte_3w(0x80);	    // and write it back to seconds reg
-    wbyte_3w(t);        // less CH bit
-
-    reset_3w();
-    getConfigRam();
-    t  = clockRam.check0;
-    t ^= clockRam.check1;
-    // if ram bad, initialize everything
-    if (t != 0xff)
-        initColdStart();
+    SendByte(DS1302_CMD(DS1302_CLK, DS1302_SECOND, DS1302_WRITE));
+    SendByte(t);        // and write it back to seconds reg
+    EndComm();
 }
