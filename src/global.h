@@ -1,4 +1,3 @@
-
 #ifndef _GLOBAL_H
 #define _GLOBAL_H
 
@@ -6,51 +5,53 @@
 #define FALSE   0
 
 //---------------------------------------------------------------------------
-// Begin Software Option configuration
+// Software Option configuration
 //---------------------------------------------------------------------------
 
 #define OPT_DAY_ALPHA   TRUE    // display days as characters
 #define OPT_MONTH_ALPHA TRUE
-#define OPT_BLANK_ZERO  TRUE    // T = 1:00 F = 01:00
+#define OPT_BLANK_ZERO  TRUE    // T = 1:00, F = 01:00
 #define SETUP_TIMEOUT   60      // seconds
 //#define DEBUG                 // serial debugging
 //#define TEST_DEFAULTS         // load defaults at every power-up
 
 //---------------------------------------------------------------------------
-// End Software Option configuration
-//---------------------------------------------------------------------------
-
-//---------------------------------------------------------------------------
-// Begin Hardware Option configuration
+// Hardware Option configuration
 //---------------------------------------------------------------------------
 
 #define FOSC    22118400L           // clock speed in Hz
 
-#define BOARD_TALKING       FALSE
-#define BOARD_BLUE_6        FALSE
-#define BOARD_BLUE_5_RELAY  FALSE
-#define BOARD_YELLOW_5      FALSE
-#define BOARD_YELLOW_SMALL  FALSE
-#define BOARD_WHITE_SMALL   TRUE
-#define BOARD_GREEN_SMALL   FALSE
+// Board type definitions
+#define BOARD_TALKING       1
+#define BOARD_BLUE_6        2
+#define BOARD_BLUE_5_RELAY  3
+#define BOARD_YELLOW_5      4
+#define BOARD_YELLOW_SMALL  5
+#define BOARD_WHITE_SMALL   6
+#define BOARD_GREEN_SMALL   7
 
-#define PROC_IS_15W404AS    TRUE    // or 15W408AS
-#define PROC_IS_15F204EA    FALSE
+// Processor type definitions
+#define PROC_15W401AS       1       // e.g. 15W404AS, 15W408AS
+#define PROC_15F204EA       2
+
+// Select board and processor types from the above options
+#define BOARD_TYPE          BOARD_YELLOW_SMALL
+#define PROC_TYPE           PROC_15W401AS
 
 #define HAS_LDR             TRUE    // light-dependent resistor
-
-#define COMMON_ANODE        TRUE    // else common cathode
+#define COMMON_ANODE        FALSE    // else common cathode
 #define DIGIT_2_FLIP        FALSE
 
 //---------------------------------------------------------------------------
-// End Hardware Option configuration
+// Board hardware defines
 //---------------------------------------------------------------------------
 
-//---------------------------------------------------------------------------
-// Begin board hardware defines
+#ifndef BOARD_TYPE
+#error BOARD_TYPE is not defined
+
 //---------------------------------------------------------------------------
 
-#if BOARD_TALKING
+#elif BOARD_TYPE == BOARD_TALKING
 
 #define HAS_NY3P_SPEECH TRUE
 #define NY3P_RST    P3_6
@@ -81,12 +82,9 @@
 #define LED_COMMON_BIT(pos) (2 + (pos))
 #define LED_SEGMENT_PORT    P2
 
-#endif  // board_talking
-
-//---------------------------------------------------------------------------
 //---------------------------------------------------------------------------
 
-#if BOARD_BLUE_6
+#elif BOARD_TYPE == BOARD_BLUE_6
 
 // Pushbutton port pins
 #define S2 P3_0
@@ -110,27 +108,26 @@
 #define LED_COMMON_BIT(pos) (2 + (pos)
 #define LED_SEGMENT_PORT    P2
 
-#endif  // board_blue_6
-
-//---------------------------------------------------------------------------
 //---------------------------------------------------------------------------
 
-#if BOARD_BLUE_5_RELAY
+#elif BOARD_TYPE == BOARD_BLUE_5_RELAY
 
 // Pushbutton port pins
 #define S1 P3_0
 #define S2 P3_1
 
 // DS1302 pin to port mapping
-#if PROC_IS_15W404AS
+#if PROC_TYPE == PROC_15W401AS
     #define DS1302_CE_SBIT      P5_4
     #define DS1302_IO_SBIT      P5_5
-    #define DS1302_SCK_SBIT     P3_2
-#elif PROC_IS_15F204EA
+#elif PROC_TYPE == PROC_15F204EA
     #define DS1302_CE_SBIT      P0_0
     #define DS1302_IO_SBIT      P0_1
-    #define DS1302_SCK_SBIT     P3_2
+#else
+    #error Target processor is unknown
 #endif
+
+#define DS1302_SCK_SBIT     P3_2
 
 // adc channels for sensors
 #define ADC_LDR   6
@@ -145,25 +142,26 @@
 #define LED_COMMON_BIT(pos) (4 + (pos))
 #define LED_SEGMENT_PORT    P2
 
-#endif  // board_blue_5_relay
-
-//---------------------------------------------------------------------------
 //---------------------------------------------------------------------------
 
-#if BOARD_YELLOW_5
+#elif BOARD_TYPE == BOARD_YELLOW_5
 
 // Pushbutton port pins
 #define S2 P3_0
 #define S1 P3_1
 
 // DS1302 pin to port mapping
-#if PROC_IS_15W404AS
+#if PROC_TYPE == PROC_15W401AS
     #define DS1302_CE_SBIT      P5_4
     #define DS1302_IO_SBIT      P5_5
-    #define DS1302_SCK_SBIT     P3_2
-#elif PROC_IS_15F204EA
-    // not setup yet
+#elif PROC_TYPE == PROC_15F204EA
+    #define DS1302_CE_SBIT      P0_0
+    #define DS1302_IO_SBIT      P0_1
+#else
+    #error Target processor is unknown
 #endif
+
+#define DS1302_SCK_SBIT     P3_2
 
 // adc channels for sensors
 #define ADC_LDR   7
@@ -178,14 +176,9 @@
 #define LED_COMMON_BIT(pos) (4 + (pos))
 #define LED_SEGMENT_PORT    P2
 
-#endif  // board_yellow_5
-
-//---------------------------------------------------------------------------
 //---------------------------------------------------------------------------
 
-#if BOARD_WHITE_SMALL
-
-#define DP1_IS_COLON TRUE
+#elif BOARD_TYPE == BOARD_WHITE_SMALL
 
 // Pushbutton port pins
 #define S2 P3_0
@@ -193,17 +186,17 @@
 
 // DS1302 pin to port mapping
 #if 1
-#define DS1302_CE_SBIT      P1_0
-#define DS1302_IO_SBIT      P1_1
-#define DS1302_SCK_SBIT     P1_2
+    #define DS1302_CE_SBIT      P1_0
+    #define DS1302_IO_SBIT      P1_1
+    #define DS1302_SCK_SBIT     P1_2
 #else
-// for testing
-#define DS1302_CE_SFR       P1
-#define DS1302_CE_BIT       0
-#define DS1302_IO_SFR       P1
-#define DS1302_IO_BIT       1
-#define DS1302_SCK_SFR      P1
-#define DS1302_SCK_BIT      2
+    // for testing
+    #define DS1302_CE_SFR       P1
+    #define DS1302_CE_BIT       0
+    #define DS1302_IO_SFR       P1
+    #define DS1302_IO_BIT       1
+    #define DS1302_SCK_SFR      P1
+    #define DS1302_SCK_BIT      2
 #endif
 
 // adc channels for sensors
@@ -219,14 +212,9 @@
 #define LED_COMMON_BIT(pos) (2 + (pos))
 #define LED_SEGMENT_PORT    P2
 
-#endif  // board_white_small
-
-//---------------------------------------------------------------------------
 //---------------------------------------------------------------------------
 
-#if BOARD_YELLOW_SMALL
-
-#define DP1_IS_COLON TRUE
+#elif BOARD_TYPE == BOARD_YELLOW_SMALL
 
 // Pushbutton port pins
 #define S2 P2_6
@@ -242,7 +230,14 @@
 #define ADC_TEMP  7
 
 // buzzer port pins and active state set
-#define BUZZ_SBIT   P5_5
+#if PROC_TYPE == PROC_15W401AS
+    #define BUZZ_SBIT   P5_5
+#elif PROC_TYPE == PROC_15F204EA
+    #define BUZZ_SBIT   P0_1
+#else
+    #error Target processor is unknown
+#endif
+
 #define BUZZ_ON     0
 
 #define LED_COMMON_PORT     P2
@@ -250,29 +245,25 @@
 #define LED_COMMON_BIT(pos) (3 - (pos))
 #define LED_SEGMENT_PORT    P3
 
-#endif  // board_yellow_small
-
-//---------------------------------------------------------------------------
 //---------------------------------------------------------------------------
 
-#if BOARD_GREEN_SMALL
-
-#define DP1_IS_COLON TRUE
+#elif BOARD_TYPE == BOARD_GREEN_SMALL
 
 // Pushbutton port pins
 #define S2 P1_3
 #define S1 P1_4
 
 // DS1302 pin to port mapping
-#if PROC_IS_15W404AS
+#if PROC_TYPE == PROC_15W401AS
     #define DS1302_CE_SBIT      P5_5
-    #define DS1302_IO_SBIT      P3_1
-    #define DS1302_SCK_SBIT     P3_2
-#elif PROC_IS_15F204EA
-    #define DS1302_CE_SBIT      P1_0
-    #define DS1302_IO_SBIT      P3_1
-    #define DS1302_SCK_SBIT     P3_2
+#elif PROC_TYPE == PROC_15F204EA
+    #define DS1302_CE_SBIT      P0_1
+#else
+    #error Target processor is unknown
 #endif
+
+#define DS1302_IO_SBIT      P3_1
+#define DS1302_SCK_SBIT     P3_2
 
 // adc channels for sensors
 #define ADC_LDR   4
@@ -287,6 +278,10 @@
 #define LED_COMMON_BIT(pos) (3 + (pos)
 #define LED_SEGMENT_PORT    P2
 
-#endif  // board_green_small
+//---------------------------------------------------------------------------
+
+#else
+    #error BOARD_TYPE not recognized
+#endif
 
 #endif  // file
