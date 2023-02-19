@@ -64,6 +64,7 @@ The settings are:
     1. hour
     2. minute
     3. seconds (S2 snaps to the nearest minute)
+    4. 'co' daily correction of -9 to +9 seconds
 2. `AL` alarm settings
     1. on/off
     2. hour
@@ -94,7 +95,7 @@ This firmware is applicable to clock kits using an STC15 series microcontroller.
 
 Hopefully, you installed the 4-pin programming header (P1) while building your clock. If not, you may need to either desolder the 7-segment display, or solder a header (perhaps via flywires) to the board surface.
 
-Since the original firmware loaded on the STC processor cannot be copied, you cannot save and restore what you originally received with your clock. If you want to retain this code for any reason, you must leave your original microcontroller unmodified, and purchase another chip of the same type (or same base type with more flash). These are readily available on AliExpress and eBay in small quantities.
+Since the original firmware loaded on the STC processor cannot be copied, you cannot save and restore what you originally received with your clock. If you want to retain this code for any reason, you must leave your original microcontroller unmodified, and purchase a compatible replacement chip. These are readily available on AliExpress and eBay in small quantities.
 
 For connection to the board, use a USB serial adapter with 5V signals. These are commonly based on FT232, PL2303 or CH340 chipsets. It will be connected to the board as follows:
 

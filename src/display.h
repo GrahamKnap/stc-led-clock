@@ -15,6 +15,8 @@
     (uint8_t)((0 << 7) | ((g) << 6) | ((f) << 5) | ((e) << 4) \
     | ((d) << 3) | ((c) << 2) | ((b) << 1) | ((a) << 0))
 
+#define SEVENSEG_blank 0
+
 #define SEVENSEG_0 SEVENSEG(1,1,1,1,1,1,0)
 #define SEVENSEG_1 SEVENSEG(0,1,1,0,0,0,0)
 #define SEVENSEG_2 SEVENSEG(1,1,0,1,1,0,1)

@@ -36,25 +36,25 @@ __bit __at 0x7F twelveHour; // = 1 when 12 hr mode
 
 // The coldstart initialization table.
 // Here you can set the reset at power up defaults to your liking.
-// Note that most of the values are in BCD.
 // Declaring invalid values will usually result in just strange
 // displays - but may cause crashes since the data is not validated.
 
 static const CLOCK defaultClock = {
-    0x55, 0x59, 0x19,                   // second, minute, hour
-    0x01, 0x01,                         // date, month
+    0x55, 0x59, 0x19,                   // BCD second, minute, hour
+    0x01, 0x01,                         // BCD date, month
     0x07,                               // day of week (1-7)
-    0x22                                // 2-digit year
+    0x22                                // BCD 2-digit year
 };
 
 static const CONFIG defaultConfig = {
     CONFIG_MAGIC,                       // check byte
     TWELVE_HOUR | MONTH_FIRST,          // mode bits
-    0x07, 0x00,                         // alarm hour, minute
-    0x08,                               // chime start hour
-    0x21,                               // chime stop hour
-    0x31, 0x01,                         // brightness max/min
-    0x00                                // temp offset
+    0x07, 0x00,                         // BCD alarm hour, minute
+    0x08,                               // BCD chime start hour
+    0x21,                               // BCD chime stop hour
+    0x31, 0x01,                         // BCD brightness max/min
+    0x00,                               // temp offset
+    0x00,                               // drift comp
 };
 
 void ResetRtc(void)

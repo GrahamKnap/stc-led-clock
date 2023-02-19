@@ -26,7 +26,7 @@
 enum stateTable
 {
     stClock,
-    msClock, msClockHour, msClockMinute, msClockSeconds,
+    msClock, msClockHour, msClockMinute, msClockSeconds, msDriftComp,
     msAlarm, msAlarmToggle, msAlarmHour, msAlarmMinute,
     msChime, msChimeToggle, msChimeStartHour, msChimeStopHour,
     msDate, msYear, msMonth, msDateDay, msDayOfWeek,
@@ -40,11 +40,11 @@ static uint8_t displayState;    // the main control variable
 static uint8_t bcdTemp;         // result of ADC and transform
 static uint8_t setupTimeout;
 
-
 static void ClockStateMachine(void)
 {
-    static __bit handleS1;
-    static __bit handleS2;
+    static __bit driftCompPending = FALSE;
+    __bit handleS1;
+    __bit handleS2;
 
     handleS1 = pressedS1;
     pressedS1 = FALSE;
@@ -56,6 +56,22 @@ static void ClockStateMachine(void)
 
     case stClock:
         ReadClock();
+
+        if (clock.hour == 0x23 && clock.minute == 0x59)
+        {
+            if (clock.second == 0)
+            {
+                driftCompPending = TRUE;
+            }
+            else if (clock.second == 0x30 && driftCompPending)
+            {
+                driftCompPending = FALSE;
+                clock.second += config.driftComp;
+                // BCD subtraction correction
+                if (config.driftComp < 0) clock.second -= 6;
+                WriteClock();
+            }
+        }
 
         if (userTimer100 == 0)
         {
@@ -176,7 +192,7 @@ static void ClockStateMachine(void)
 
         if (handleS1)
         {
-            displayState = msExit;
+            displayState = msDriftComp;
         }
         else if (handleS2)
         {
@@ -188,6 +204,39 @@ static void ClockStateMachine(void)
 
             clock.second = 0;
             WriteClock();
+        }
+
+        break;
+
+    case msDriftComp:
+        digit[0] = SEVENSEG_c;
+        digit[1] = SEVENSEG_o;
+
+        if (config.driftComp >= 0)
+        {
+            DisplayHexRight(config.driftComp);
+            digit[2] = SEVENSEG_blank;
+        }
+        else
+        {
+            DisplayHexRight(-config.driftComp);
+            digit[2] = ORIENT_DIGIT2(SEVENSEG_dash);
+        }
+
+        if (handleS1)
+        {
+            displayState = msSaveConfig;
+        }
+        else if (handleS2)
+        {
+            if (config.driftComp >= 9)
+            {
+                config.driftComp = -9;
+            }
+            else
+            {
+                config.driftComp++;
+            }
         }
 
         break;

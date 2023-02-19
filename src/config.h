@@ -17,6 +17,7 @@ typedef struct CONFIG_T {
     uint8_t brightMaximum;  // [6] BCD; 0x01..0x50
     uint8_t brightMinimum;  // [7] BCD; 0x01..0x50
     int8_t  tempOffset;     // [8] constrain range to +/- 15
+    int8_t  driftComp;      // [9] constrain range to +/- 9
 } CONFIG;
 
 extern CONFIG config;
