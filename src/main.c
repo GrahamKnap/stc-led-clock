@@ -641,7 +641,7 @@ static void ClockStateMachine(void)
             }
 
 #if !HAS_LDR
-            brightLevel = clock.brightMaximum;
+            brightLevel = BcdToDec(clock.brightMaximum);
 #endif
         }
 

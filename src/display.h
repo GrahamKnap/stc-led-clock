@@ -72,7 +72,7 @@
 
 #define DP_BIT      0x80
 
-extern uint8_t brightLevel;
+extern uint8_t brightLevel;     // not BCD
 extern uint8_t digit[4];
 
 void InitDisplay(void);
