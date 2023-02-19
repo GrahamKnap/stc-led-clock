@@ -34,45 +34,31 @@ __bit __at 0x7F twelveHour; // = 1 when 12 hr mode
 #define MONTH_FIRST  0x40   // select month:day display format MM:DD or DD:MM
 #define TWELVE_HOUR  0x80   // = 1 when 12 hr mode
 
-// The coldstart initialization table.
-// Here you can set the reset at power up defaults to your liking.
-// Declaring invalid values will usually result in just strange
-// displays - but may cause crashes since the data is not validated.
-
-static const CLOCK defaultClock = {
-    0x55, 0x59, 0x19,                   // BCD second, minute, hour
-    0x01, 0x01,                         // BCD date, month
-    0x07,                               // day of week (1-7)
-    0x22                                // BCD 2-digit year
-};
-
-static const CONFIG defaultConfig = {
-    CONFIG_MAGIC,                       // check byte
-    TWELVE_HOUR | MONTH_FIRST,          // mode bits
-    0x07, 0x00,                         // BCD alarm hour, minute
-    0x08,                               // BCD chime start hour
-    0x21,                               // BCD chime stop hour
-    0x31, 0x01,                         // BCD brightness max/min
-    0x00,                               // temp offset
-    0x00,                               // drift comp
-};
-
 void ResetRtc(void)
 {
-    uint8_t i;
+    // You can adjust these defaults to your liking.
+    // Declaring invalid values will usually result in just strange
+    // displays, but may cause crashes since the data is not validated.
 
-    // we could use memcpy() here, but it's much larger
-    for (i = 0; i < sizeof(CLOCK); i++)
-    {
-        ((uint8_t *)&clock)[i] = ((uint8_t *)&defaultClock)[i];
-    }
-
-    for (i = 0; i < sizeof(CONFIG); i++)
-    {
-        ((uint8_t *)&config)[i] = ((uint8_t *)&defaultConfig)[i];
-    }
-
-    configFlags = config.flags;
+    clock.second = 0x55;    // [0] BCD; 0x00..0x59
+    clock.minute = 0x59;    // [1] BCD; 0x00..0x59
+    clock.hour = 0x19;      // [2] BCD; 0x00..0x23
+    clock.date = 0x01;      // [3] day of month; BCD; 0x01..0x31
+    clock.month = 0x01;     // [4] BCD; 0x01..0x12
+    clock.weekday = 1;      // [5] 1..7
+    clock.year = 23;        // [6] BCD; 0x00..0x99
     WriteClock();
+
+    config.magic = CONFIG_MAGIC;    // [0]
+    config.flags = TWELVE_HOUR | MONTH_FIRST;
+    config.alarmHour = 0x07;        // [2] BCD; 0x00..0x23
+    config.alarmMinute = 0x00;      // [3] BCD; 0x00..0x59
+    config.chimeStartHour = 0x08;   // [4] BCD; 0x00..0x23
+    config.chimeStopHour = 0x21;    // [5] BCD; 0x00..0x23
+    config.brightMaximum = 0x30;    // [6] BCD; 0x01..0x50
+    config.brightMinimum = 0x01;    // [7] BCD; 0x01..0x50
+    config.tempOffset = 0;          // [8] -15 to +15
+    config.driftComp = 0;           // [9] -9 to +9
+    configFlags = config.flags;
     WriteConfig();
 }

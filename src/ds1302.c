@@ -240,7 +240,7 @@ void WriteClock(void)
 {
     uint8_t i, x;
 
-    clock.wp = 0;
+    clock.control = 0;
     BeginComm();
     SendByte(DS1302_CMD(DS1302_CLK, DS1302_BURST, DS1302_WRITE));
 

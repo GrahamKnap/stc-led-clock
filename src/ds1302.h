@@ -15,8 +15,11 @@ typedef struct CLOCK_T {
     uint8_t month;          // [4] BCD; 0x01..0x12
     uint8_t weekday;        // [5] 1..7
     uint8_t year;           // [6] BCD; 0x00..0x99
-    uint8_t wp;             // [7] write-protect register
+    uint8_t control;        // [7] control register
 } CLOCK;
+
+// control register bit assignments
+#define DS1302_WP   0x80
 
 extern CLOCK clock;
 
