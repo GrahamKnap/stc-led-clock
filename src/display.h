@@ -64,7 +64,7 @@
 #define ROTATE_DIGIT(v) \
     (uint8_t)(((v) & 0xc0) | (((v) & 0x07) << 3) | (((v) & 0x38) >> 3))
 
-#if DIGIT_2_FLIP
+#ifdef DIGIT_2_FLIP
     #define ORIENT_DIGIT2(v) ROTATE_DIGIT(v)
 #else
     #define ORIENT_DIGIT2(v) (v)

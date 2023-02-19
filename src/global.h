@@ -8,9 +8,9 @@
 // Software Option configuration
 //---------------------------------------------------------------------------
 
-#define OPT_DAY_ALPHA   TRUE    // display days as characters
-#define OPT_MONTH_ALPHA TRUE
-#define OPT_BLANK_ZERO  TRUE    // T = 1:00, F = 01:00
+#define OPT_DAY_ALPHA
+#define OPT_MONTH_ALPHA
+#define OPT_BLANK_ZERO          // display '1:00' rather than '01:00'
 #define SETUP_TIMEOUT   60      // seconds
 //#define DEBUG                 // serial debugging
 //#define TEST_DEFAULTS         // load defaults at every power-up
@@ -38,9 +38,9 @@
 #define BOARD_TYPE          BOARD_YELLOW_SMALL
 #define PROC_TYPE           PROC_15W401AS
 
-#define HAS_LDR             TRUE    // light-dependent resistor
-#define COMMON_ANODE        FALSE    // else common cathode
-#define DIGIT_2_FLIP        FALSE
+#define HAS_LDR             // light-dependent resistor
+//#define COMMON_ANODE      // else common cathode
+//#define DIGIT_2_FLIP
 
 //---------------------------------------------------------------------------
 // Board hardware defines
@@ -53,7 +53,7 @@
 
 #elif BOARD_TYPE == BOARD_TALKING
 
-#define HAS_NY3P_SPEECH TRUE
+#define HAS_NY3P_SPEECH
 #define NY3P_RST    P3_6
 #define NY3P_DAT    P3_7
 #define NY3P_BZY    P1_3

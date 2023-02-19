@@ -22,7 +22,7 @@ static uint8_t displayDigit[4];
 
 // The following definitions must be provided by global.h:
 //
-// #define COMMON_ANODE         TRUE or FALSE
+// #define COMMON_ANODE         // if applicable, else common cathode
 // #define LED_COMMON_PORT      P3
 // LED digit common connections, either common anodes or cathodes.
 //
@@ -69,7 +69,7 @@ void InitDisplay(void)
     //
     // The weak pull-up of ~200uA is insufficient for anodes,
     // so set anode connections to 20mA push/pull.
-#if COMMON_ANODE
+#ifdef COMMON_ANODE
     LED_COMMON_PXM0 |= LED_COMMON_MASK;
     //LED_COMMON_PXM1 &= ~(LED_COMMON_MASK);
     //LED_SEGMENT_PXM0 = 0;
@@ -81,7 +81,7 @@ void InitDisplay(void)
     //LED_SEGMENT_PXM1 = 0;
 #endif
 
-#if COMMON_ANODE
+#ifdef COMMON_ANODE
     LED_COMMON_PORT &= ~(LED_COMMON_MASK);
 #else
     LED_COMMON_PORT |= (LED_COMMON_MASK);
@@ -97,7 +97,7 @@ void DisplayUpdateISR(void)
 
     if (tick == 0)
     {
-#if COMMON_ANODE
+#ifdef COMMON_ANODE
         LED_SEGMENT_PORT = ~displayDigit[pos];
 
         switch (pos)
@@ -121,7 +121,7 @@ void DisplayUpdateISR(void)
     }
     else if (tick >= brightLevel)
     {
-#if COMMON_ANODE
+#ifdef COMMON_ANODE
         LED_COMMON_PORT &= ~(LED_COMMON_MASK);
 #else
         LED_COMMON_PORT |= (LED_COMMON_MASK);
@@ -134,7 +134,7 @@ void DisplayUpdateISR(void)
     {
         tick = 0;
 
-#if COMMON_ANODE
+#ifdef COMMON_ANODE
         LED_COMMON_PORT &= ~(LED_COMMON_MASK);
 #else
         LED_COMMON_PORT |= (LED_COMMON_MASK);
@@ -151,7 +151,7 @@ static const uint8_t hexadecimalGlyph[] = {
     SEVENSEG_C, SEVENSEG_d, SEVENSEG_E, SEVENSEG_F
 };
 
-#if DIGIT_2_FLIP
+#ifdef DIGIT_2_FLIP
 static const uint8_t hexadecimalGlyphFlip[] = {
     ROTATE_DIGIT(SEVENSEG_0), ROTATE_DIGIT(SEVENSEG_1),
     ROTATE_DIGIT(SEVENSEG_2), ROTATE_DIGIT(SEVENSEG_3),
@@ -164,7 +164,7 @@ static const uint8_t hexadecimalGlyphFlip[] = {
 };
 #endif
 
-#if OPT_DAY_ALPHA
+#ifdef OPT_DAY_ALPHA
 static const uint8_t dayText[] = {
     SEVENSEG_S, ORIENT_DIGIT2(SEVENSEG_u), SEVENSEG_n,
     SEVENSEG_M, ORIENT_DIGIT2(SEVENSEG_o), SEVENSEG_n,
@@ -192,7 +192,7 @@ void DisplayDayOfWeek(void)
     // clock.weekday reads 1 through 7.
     digit[0] = 0;
     digit[1] = SEVENSEG_dash;
-#if DIGIT_2_FLIP
+#ifdef DIGIT_2_FLIP
     digit[2] = hexadecimalGlyphFlip[clock.weekday];
 #else
     digit[2] = hexadecimalGlyph[clock.weekday];
@@ -201,7 +201,7 @@ void DisplayDayOfWeek(void)
 }
 #endif // OPT_DAY_ALPHA
 
-#if OPT_MONTH_ALPHA
+#ifdef OPT_MONTH_ALPHA
 static const uint8_t monthText[] = {
     SEVENSEG_J, ROTATE_DIGIT(SEVENSEG_J), SEVENSEG_A,
     SEVENSEG_F, ROTATE_DIGIT(SEVENSEG_F), SEVENSEG_E,
@@ -232,7 +232,7 @@ void DisplayMonth(uint8_t m)
     }
     else
     {
-#if DIGIT_2_FLIP
+#ifdef DIGIT_2_FLIP
         digit[2] = monthText[m + 1];
 #else
         digit[2] = monthText[m];
@@ -262,7 +262,7 @@ void DisplayHexLeft(uint8_t value)
 
 void DisplayHexRight(uint8_t value)
 {
-#if DIGIT_2_FLIP
+#ifdef DIGIT_2_FLIP
     digit[2] = hexadecimalGlyphFlip[value >> 4];
 #else
     digit[2] = hexadecimalGlyph[value >> 4];
@@ -275,7 +275,7 @@ void DisplayHours(uint8_t h)
 {
     h = ConvertHours(h);
 
-#if OPT_BLANK_ZERO
+#ifdef OPT_BLANK_ZERO
     if ((h >> 4) != 0) digit[0] = hexadecimalGlyph[h >> 4];
     digit[1] = hexadecimalGlyph[h & 0x0f];
 #else
@@ -286,7 +286,7 @@ void DisplayHours(uint8_t h)
 void DisplayTemperature(uint8_t t)
 {
     DisplayHexLeft(t);
-#if DIGIT_2_FLIP
+#ifdef DIGIT_2_FLIP
     digit[2] = ((degreesF) ? ROTATE_DIGIT(SEVENSEG_F) : ROTATE_DIGIT(SEVENSEG_C)) | DP_BIT;
 #else
     digit[2] = (degreesF) ? SEVENSEG_F : SEVENSEG_C;
@@ -298,7 +298,7 @@ void DisplayColon(void)
 {
     digit[1] |= DP_BIT;
 
-#if DIGIT_2_FLIP
+#ifdef DIGIT_2_FLIP
     digit[2] |= DP_BIT;
 #endif
 }

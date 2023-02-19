@@ -476,7 +476,7 @@ static void ClockStateMachine(void)
     case msDayOfWeek:
         if (flashStateS2)
         {
-#if OPT_DAY_ALPHA
+#ifdef OPT_DAY_ALPHA
             DisplayDayOfWeek();
 #else
             DisplayRightHex(clock.weekday);
@@ -640,7 +640,7 @@ static void ClockStateMachine(void)
                 config.brightMinimum = 0x01;
             }
 
-#if !HAS_LDR
+#ifndef HAS_LDR
             brightLevel = BcdToDec(clock.brightMaximum);
 #endif
         }
@@ -738,7 +738,7 @@ static void ReadSensors(void)
     if (roundRobin == 0)
     {
         bcdTemp = DecToBcd(DecodeTemperature(adcResult) + config.tempOffset);
-#if HAS_LDR
+#ifdef HAS_LDR
         roundRobin = 1;
         StartADC(ADC_LDR);
     }
@@ -760,7 +760,7 @@ int main()
 
     InitDisplay();
 
-#if HAS_LDR
+#ifdef HAS_LDR
     InitADC(ADC_LDR);
 #endif
 
@@ -779,7 +779,7 @@ int main()
     }
 #endif
 
-#if HAS_NY3P_SPEECH
+#ifdef HAS_NY3P_SPEECH
     InitSpeech();
 #endif
 
@@ -817,7 +817,7 @@ int main()
             }
         }
 
-#if HAS_NY3P_SPEECH
+#ifdef HAS_NY3P_SPEECH
         if (displayState == stClock && pressedS3)
         {
             speakTime();
