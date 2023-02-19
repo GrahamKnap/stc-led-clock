@@ -64,7 +64,7 @@ The settings are:
     1. hour
     2. minute
     3. seconds (S2 snaps to the nearest minute)
-    4. 'co' daily correction of -9 to +9 seconds
+    4. `co` daily correction of -9 to +9 seconds
 2. `AL` alarm settings
     1. on/off
     2. hour
